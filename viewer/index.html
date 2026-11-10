@@ -21,7 +21,7 @@
       </div>
       <div class="header-branding">
         <h1 class="tactical-title">BATTLESHIP <span class="accent-text">COMMAND &amp; STRATEGY LAB</span></h1>
-        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 13 ATTACK STRATEGIES • 3 RULESET VARIANTS</div>
+        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 13 ATTACK STRATEGIES • 4 RULESET VARIANTS</div>
       </div>
     </div>
 
@@ -144,6 +144,7 @@
             <option value="standard" selected>Standard Hasbro (1-Shot)</option>
             <option value="salvo">Salvo Mode (Volley = Ships)</option>
             <option value="silent">Silent Sinking (Fog of War)</option>
+            <option value="salvo_silent">Salvo + Fog of War</option>
           </select>
         </div>
 
@@ -421,6 +422,13 @@
               <span class="pill-title">Silent Sinking</span>
             </div>
             <span class="pill-tagline">Fog of War • No Alerts</span>
+          </button>
+          <button class="ruleset-pill" data-ruleset="salvo_silent">
+            <div class="pill-top-row">
+              <span class="pill-dot dot-salvo_silent"></span>
+              <span class="pill-title">Salvo + Fog</span>
+            </div>
+            <span class="pill-tagline">Volleys • Fog of War</span>
           </button>
         </div>
       </div>
@@ -718,6 +726,10 @@
                     <th>Δ RANK</th>
                     <th>SILENT WIN%</th>
                     <th>SILENT MEAN</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-salvo-silent);">SALVO+FOG RANK</th>
+                    <th>Δ RANK</th>
+                    <th>SALVO+FOG WIN%</th>
+                    <th>SALVO+FOG MEAN</th>
                   </tr>
                 </thead>
                 <tbody id="cross-meta-attack-tbody">
@@ -749,6 +761,10 @@
                     <th>Δ RANK</th>
                     <th>SILENT WIN%</th>
                     <th>SILENT SURVIVED</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-salvo-silent);">SALVO+FOG RANK</th>
+                    <th>Δ RANK</th>
+                    <th>SALVO+FOG WIN%</th>
+                    <th>SALVO+FOG SURVIVED</th>
                   </tr>
                 </thead>
                 <tbody id="cross-meta-defense-tbody">

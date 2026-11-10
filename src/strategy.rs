@@ -3831,4 +3831,65 @@ mod tests {
         dedup.dedup();
         assert_eq!(dedup.len(), 5, "Salvo shots must be distinct cells");
     }
+
+    #[test]
+    fn test_all_13_strategies_complete_salvo_silent() {
+        let mut rng = Rng::with_seed(1234);
+        let mut strategies: Vec<Box<dyn AttackStrategy>> = vec![
+            Box::new(HuntAndTargetAttack::new()),
+            Box::new(CheckerboardAttack::new()),
+            Box::new(LargestRectMidpointAttack::new()),
+            Box::new(AdaptiveStrideUpAttack::new()),
+            Box::new(StaggeredFourToTwoAttack::new()),
+            Box::new(RectStrideFourAttack::new()),
+            Box::new(DescendingStrideAttack::new()),
+            Box::new(RectDescendingStrideAttack::new()),
+            Box::new(RectCheckerboardAttack::new()),
+            Box::new(MonteCarloAttack::new()),
+            Box::new(BayesianPdfAttack::new()),
+            Box::new(CrosshairStrideAttack::new()),
+            Box::new(CrosshairDescendingAttack::new()),
+        ];
+
+        let mut defense = RandomDefense::new();
+
+        for strat in &mut strategies {
+            let mut board = defense.place_ships(&mut rng);
+            let mut view = TrackingBoard::with_ruleset(Ruleset::SalvoSilent);
+            strat.reset();
+
+            let mut shots = 0;
+            while !board.all_sunk() && shots < 100 {
+                let unshot_count = view.unshot_cells().len();
+                let k = 5.min(unshot_count);
+                if k == 0 {
+                    break;
+                }
+                let salvo = strat.choose_salvo(&view, k, &mut rng);
+                assert!(!salvo.is_empty(), "Strategy {} returned empty salvo", strat.name());
+                let mut volley_results = Vec::new();
+                for pos in salvo {
+                    shots += 1;
+                    assert!(view.is_unshot(pos.0, pos.1), "Strategy {} re-shot cell {:?}", strat.name(), pos);
+                    let outcome = board.receive_shot_with_ruleset(pos.0, pos.1, Ruleset::SalvoSilent);
+                    assert!(!matches!(outcome, ShotOutcome::Sunk(_)), "SalvoSilent must never return Sunk outcome");
+                    volley_results.push((pos, outcome));
+                    if board.all_sunk() || shots >= 100 {
+                        break;
+                    }
+                }
+                for (pos, outcome) in volley_results {
+                    view.record_shot(pos.0, pos.1, outcome);
+                    strat.on_shot_result(pos, outcome, &view);
+                }
+            }
+
+            assert!(
+                board.all_sunk(),
+                "Strategy {} failed to sink fleet under SalvoSilent",
+                strat.name()
+            );
+            assert!(shots <= 100);
+        }
+    }
 }

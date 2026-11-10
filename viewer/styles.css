@@ -57,9 +57,11 @@
   --ruleset-standard: #06b6d4;
   --ruleset-salvo: #f59e0b;
   --ruleset-silent: #ec4899;
+  --ruleset-salvo-silent: #a855f7;
   --ruleset-standard-glow: rgba(6, 182, 212, 0.4);
   --ruleset-salvo-glow: rgba(245, 158, 11, 0.4);
   --ruleset-silent-glow: rgba(236, 72, 153, 0.4);
+  --ruleset-salvo-silent-glow: rgba(168, 85, 247, 0.4);
 
   /* Ship Colors */
   --ship-carrier: #0ea5e9;
@@ -298,6 +300,15 @@ body.command-center-theme {
 }
 .ruleset-badge.badge-silent .ruleset-dot {
   background: var(--ruleset-silent);
+}
+
+.ruleset-badge.badge-salvo_silent {
+  border-color: var(--ruleset-salvo-silent);
+  color: #c084fc;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
+}
+.ruleset-badge.badge-salvo_silent .ruleset-dot {
+  background: var(--ruleset-salvo-silent);
 }
 
 /* Engine Badge */
@@ -2482,6 +2493,11 @@ body.command-center-theme {
   box-shadow: 0 0 14px rgba(236, 72, 153, 0.35);
 }
 
+.ruleset-pill[data-ruleset="salvo_silent"].active {
+  border-color: var(--ruleset-salvo-silent);
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.35);
+}
+
 .pill-top-row {
   display: flex;
   align-items: center;
@@ -2508,6 +2524,11 @@ body.command-center-theme {
 .dot-silent {
   background: var(--ruleset-silent);
   box-shadow: 0 0 6px var(--ruleset-silent);
+}
+
+.dot-salvo_silent {
+  background: var(--ruleset-salvo-silent);
+  box-shadow: 0 0 6px var(--ruleset-salvo-silent);
 }
 
 .pill-title {
@@ -2548,6 +2569,10 @@ body.command-center-theme {
 
 .ruleset-mechanics-banner.banner-silent {
   border-left: 4px solid var(--ruleset-silent);
+}
+
+.ruleset-mechanics-banner.banner-salvo_silent {
+  border-left: 4px solid var(--ruleset-salvo-silent);
 }
 
 .banner-mechanics-icon {

@@ -4,20 +4,21 @@
 
 A high-performance, deterministic Battleship simulation engine, CLI, and HTTP server written in **pure Rust standard library (`std` only, zero external crate dependencies)**.
 
-Simulates games across **3 distinct rulesets** (`Standard Hasbro`, `Salvo Mode`, and `Silent Sinking / Fog of War`) and provides deep statistical benchmarking across **13 distinct attack strategies** and **7 defense strategies**, including:
+Simulates games across **4 distinct rulesets** (`Standard Hasbro`, `Salvo Mode`, `Silent Sinking / Fog of War`, and `Salvo + Fog of War`) and provides deep statistical benchmarking across **13 distinct attack strategies** and **7 defense strategies**, including:
 - **13x13 All-Pairs Attack Tournament Matrix** & standings
 - **7 Defenses x 13 Attackers Survival Matrix** (mean turns to defeat fleet)
 - **7x7 Defense Head-to-Head Tournament Matrix** & overall defense rankings
-- **Cross-Ruleset Meta Comparison** (`Standard` vs. `Salvo` vs. `Silent Sinking`)
+- **Cross-Ruleset Meta Comparison** (`Standard` vs. `Salvo` vs. `Silent Sinking` vs. `Salvo + Fog of War`)
 
 ---
 
 ## Highlights
 
-- **3 Ruleset Variants (`Ruleset`)**:
+- **4 Ruleset Variants (`Ruleset`)**:
   - `standard`: **Standard Hasbro Rules** — 10×10 ocean grid (`WIDTH = 10`, `HEIGHT = 10`), 5 ships (`Carrier` 5, `Battleship` 4, `Cruiser` 3, `Submarine` 3, `Destroyer` 2 — total 17 cells), 1 shot/turn, explicit `Miss`, `Hit`, and `Sunk(ShipKind)` announcements.
   - `salvo`: **Salvo Mode** — simultaneous round volleys where shots per round equal your surviving ships (`1..=5`), coupling offensive firepower to fleet survival and planned via Virtual-Miss ("Constant Liar") batch diversification.
   - `silent`: **Silent Sinking (Fog of War)** — 1 shot/turn announcing *only* `Miss` or `Hit` (never `Sunk(ShipKind)`), testing contiguous capped-chain ship deduction, L/T-junction cluster camouflage, and joint 5-ship Monte Carlo inference.
+  - `salvo_silent`: **Salvo + Fog of War** — combines simultaneous ship-count volleys (`1..=5` shots/round) with silent sinking (`Hit` / `Miss` only, never `Sunk`), pitting Salvo firepower preservation directly against Fog-of-War cluster/endgame ambiguity.
 - **Fast Deterministic PRNG**: `Xoshiro256**` algorithm seeded via `SplitMix64` with unbiased Lemire integer range generation. 100% reproducible simulations given any 64-bit seed.
 - **13 Advanced Attack Strategies**:
   1. `random_hunt`: **Random + Hunt/Target** — uniform random hunt mode with smart collinear and orthogonal hunt-down targeting.
@@ -208,38 +209,38 @@ Columns indicate opponent. Value is row defense's win % against column when both
 
 ```
 ATTACK STRATEGIES CROSS-RULESET PERFORMANCE (Solo Mean Shots & Tournament Win %):
-+----+-----------------------------------+--------------------+--------------------+--------------------+
-| #  | Strategy                          | Standard Hasbro    | Salvo Mode         | Silent Sinking     |
-|    |                                   |  Mean   |  Win %   |  Mean   |  Win %   |  Mean   |  Win %   |
-+----+-----------------------------------+---------+----------+---------+----------+---------+----------+
-|  1 | Random + Hunt/Target              |   60.2  |   27.0%  |   65.4  |   32.6%  |   66.4  |   31.2%  |
-|  2 | Checkerboard + Hunt/Target        |   52.4  |   40.9%  |   59.6  |   41.8%  |   57.8  |   46.9%  |
-|  3 | Largest Empty Rect Midpoint       |   53.1  |   40.9%  |   57.8  |   45.9%  |   62.1  |   40.8%  |
-|  4 | Adaptive Stride (2->3->4->5)      |   50.6  |   43.5%  |   59.2  |   42.7%  |   57.6  |   47.5%  |
-|  5 | Staggered Stride (4->2)           |   52.3  |   46.4%  |   56.8  |   46.0%  |   55.7  |   47.7%  |
-|  6 | Largest Rect + Stride (4->2)      |   48.4  |   55.7%  |   54.6  |   54.1%  |   55.7  |   53.5%  |
-|  7 | Descending Stride (5->4->3->2)    |   52.4  |   44.7%  |   59.4  |   43.7%  |   58.8  |   45.7%  |
-|  8 | Largest Rect + Stride (5->4->3->2) |   48.0  |   53.4%  |   57.0  |   52.4%  |   58.0  |   50.3%  |
-|  9 | Largest Rect + Checkerboard       |   49.1  |   52.5%  |   55.6  |   51.0%  |   56.8  |   52.8%  |
-| 10 | Monte Carlo Sampling              |   46.8  |   56.5%  |   53.7  |   57.6%  |   51.2  |   65.1%  |
-| 11 | Bayesian Probability Density      |   45.7  |   62.3%  |   53.2  |   61.4%  |   51.7  |   62.3%  |
-| 12 | Crosshair Stride + Open-Target    |   45.5  |   63.4%  |   53.1  |   61.4%  |   55.7  |   54.5%  |
-| 13 | Crosshair Stride (5->4->3->2)     |   45.5  |   62.7%  |   55.1  |   59.4%  |   57.6  |   51.8%  |
-+----+-----------------------------------+---------+----------+---------+----------+---------+----------+
++----+-----------------------------------+---------+----------+---------+----------+---------+----------+---------+----------+
+| #  | Strategy                          |  Standard Hasbro   |     Salvo Mode     |   Silent Sinking   | Salvo + Fog of War |
+|    |                                   |  Mean   |  Win %   |  Mean   |  Win %   |  Mean   |  Win %   |  Mean   |  Win %   |
++----+-----------------------------------+---------+----------+---------+----------+---------+----------+---------+----------+
+|  1 | Random + Hunt/Target              |   60.2  |   27.0%  |   65.4  |   32.6%  |   66.4  |   31.2%  |   68.2  |   36.2%  |
+|  2 | Checkerboard + Hunt/Target        |   52.4  |   40.9%  |   59.6  |   41.8%  |   57.8  |   46.9%  |   60.2  |   44.2%  |
+|  3 | Largest Empty Rect Midpoint       |   53.1  |   40.9%  |   57.8  |   45.9%  |   62.1  |   40.8%  |   62.3  |   44.7%  |
+|  4 | Adaptive Stride (2->3->4->5)      |   50.6  |   43.5%  |   59.2  |   42.7%  |   57.6  |   47.5%  |   61.3  |   44.5%  |
+|  5 | Staggered Stride (4->2)           |   52.3  |   46.4%  |   56.8  |   46.0%  |   55.7  |   47.7%  |   59.0  |   49.5%  |
+|  6 | Largest Rect + Stride (4->2)      |   48.4  |   55.7%  |   54.6  |   54.1%  |   55.7  |   53.5%  |   58.0  |   54.0%  |
+|  7 | Descending Stride (5->4->3->2)    |   52.4  |   44.7%  |   59.4  |   43.7%  |   58.8  |   45.7%  |   60.8  |   45.1%  |
+|  8 | Largest Rect + Stride (5->4->3->2) |   48.0  |   53.4%  |   57.0  |   52.4%  |   58.0  |   50.3%  |   60.2  |   52.1%  |
+|  9 | Largest Rect + Checkerboard       |   49.1  |   52.5%  |   55.6  |   51.0%  |   56.8  |   52.8%  |   58.6  |   51.2%  |
+| 10 | Monte Carlo Sampling              |   46.8  |   56.5%  |   53.7  |   57.6%  |   51.2  |   65.1%  |   55.9  |   60.7%  |
+| 11 | Bayesian Probability Density      |   45.7  |   62.3%  |   53.2  |   61.4%  |   51.7  |   62.3%  |   56.3  |   60.3%  |
+| 12 | Crosshair Stride + Open-Target    |   45.5  |   63.4%  |   53.1  |   61.4%  |   55.7  |   54.5%  |   58.8  |   55.3%  |
+| 13 | Crosshair Stride (5->4->3->2)     |   45.5  |   62.7%  |   55.1  |   59.4%  |   57.6  |   51.8%  |   62.2  |   52.3%  |
++----+-----------------------------------+---------+----------+---------+----------+---------+----------+---------+----------+
 
 DEFENSE STRATEGIES CROSS-RULESET PERFORMANCE (Survival Mean & Tournament Win %):
-+-----+-----------------------------------+--------------------+--------------------+--------------------+
-|  #  | Defense Strategy                  | Standard Hasbro    | Salvo Mode         | Silent Sinking     |
-|     |                                   |  Surv   |  Win %   |  Surv   |  Win %   |  Surv   |  Win %   |
-+-----+-----------------------------------+---------+----------+---------+----------+---------+----------+
-| [D1] | Uniform Random                    |   49.2  |   45.0%  |   56.9  |   41.8%  |   56.2  |   58.0%  |
-| [D2] | Spaced (No-Touching)              |   50.3  |   47.8%  |   60.6  |   54.0%  |   52.1  |   45.2%  |
-| [D3] | Corner & Edge Hugging             |   53.9  |   60.7%  |   60.9  |   68.1%  |   55.7  |   57.7%  |
-| [D4] | Tightly Clustered Phalanx         |   47.0  |   35.7%  |   37.9  |    8.7%  |   45.3  |   27.2%  |
-| [D5] | Anti-Midpoint (Bisection Dodger)  |   53.2  |   52.6%  |   62.2  |   65.9%  |   54.1  |   49.7%  |
-| [D6] | Bait Capital + Corner Destroyer   |   55.3  |   63.9%  |   61.7  |   54.8%  |   61.0  |   68.6%  |
-| [D7] | Parallel Lanes (Single Axis)      |   50.2  |   44.2%  |   60.4  |   56.7%  |   52.2  |   43.6%  |
-+-----+-----------------------------------+---------+----------+---------+----------+---------+----------+
++-----+-----------------------------------+---------+----------+---------+----------+---------+----------+---------+----------+
+|  #  | Defense Strategy                  |  Standard Hasbro   |     Salvo Mode     |   Silent Sinking   | Salvo + Fog of War |
+|     |                                   |  Surv   |  Win %   |  Surv   |  Win %   |  Surv   |  Win %   |  Surv   |  Win %   |
++-----+-----------------------------------+---------+----------+---------+----------+---------+----------+---------+----------+
+| [D1] | Uniform Random                    |   49.2  |   45.0%  |   56.9  |   41.8%  |   56.2  |   58.0%  |   59.8  |   53.7%  |
+| [D2] | Spaced (No-Touching)              |   50.3  |   47.8%  |   60.6  |   54.0%  |   52.1  |   45.2%  |   58.8  |   50.8%  |
+| [D3] | Corner & Edge Hugging             |   53.9  |   60.7%  |   60.9  |   68.1%  |   55.7  |   57.7%  |   59.8  |   67.1%  |
+| [D4] | Tightly Clustered Phalanx         |   47.0  |   35.7%  |   37.9  |    8.7%  |   45.3  |   27.2%  |   40.7  |   13.3%  |
+| [D5] | Anti-Midpoint (Bisection Dodger)  |   53.2  |   52.6%  |   62.2  |   65.9%  |   54.1  |   49.7%  |   59.5  |   58.5%  |
+| [D6] | Bait Capital + Corner Destroyer   |   55.3  |   63.9%  |   61.7  |   54.8%  |   61.0  |   68.6%  |   63.9  |   60.3%  |
+| [D7] | Parallel Lanes (Single Axis)      |   50.2  |   44.2%  |   60.4  |   56.7%  |   52.2  |   43.6%  |   58.6  |   46.3%  |
++-----+-----------------------------------+---------+----------+---------+----------+---------+----------+---------+----------+
 ```
 
 ---
@@ -247,17 +248,17 @@ DEFENSE STRATEGIES CROSS-RULESET PERFORMANCE (Survival Mean & Tournament Win %):
 ## CLI Usage
 
 ### 1. Run Complete Benchmark (`simulate`)
-Simulates $N$ games across rulesets (`all`, `standard`, `salvo`, `silent`) for all 13 attack strategies and 7 defense strategies, printing all summary tables, cross-matrices, standings, histograms, and generating `viewer/sample_data.js`:
+Simulates $N$ games across rulesets (`all`, `standard`, `salvo`, `silent`, `salvo_silent`) for all 13 attack strategies and 7 defense strategies, printing all summary tables, cross-matrices, standings, histograms, and generating `viewer/sample_data.js`:
 
 ```bash
 cargo run --release -- simulate --games 400 --seed 42 --ruleset all
 ```
 
 ### 2. Run a Single Match (`match`)
-Simulates a single head-to-head match with custom attack, defense, and ruleset (`standard`, `salvo`, `silent`):
+Simulates a single head-to-head match with custom attack, defense, and ruleset (`standard`, `salvo`, `silent`, `salvo_silent`):
 
 ```bash
-cargo run -- match --p1 bayesian_pdf --p2 monte_carlo --d1 spaced --d2 bait_and_hide --ruleset salvo --seed 123
+cargo run -- match --p1 bayesian_pdf --p2 monte_carlo --d1 spaced --d2 bait_and_hide --ruleset salvo_silent --seed 123
 ```
 
 Attack options:
@@ -267,7 +268,7 @@ Defense options:
 - `random`, `spaced`, `corner_edge`, `clustered`, `anti_midpoint`, `bait_and_hide`, `parallel_lanes`
 
 Ruleset options:
-- `standard`, `salvo`, `silent`
+- `standard`, `salvo`, `silent`, `salvo_silent`
 
 ### 3. Launch HTTP Server & Web Viewer (`serve`)
 Starts the built-in HTTP server on `127.0.0.1:8080`:
@@ -286,14 +287,14 @@ cargo run -- serve --port 8080
   - `p2`: Attack strategy for Player 2 (default: `checkerboard`)
   - `d1`: Defense strategy for Player 1 (default: `random`)
   - `d2`: Defense strategy for Player 2 (default: `random`)
-  - `ruleset`: `standard`, `salvo`, or `silent` (default: `standard`)
+  - `ruleset`: `standard`, `salvo`, `silent`, or `salvo_silent` (default: `standard`)
   - `seed`: 64-bit integer seed (optional)
 - Response: `application/json` with complete ship placements, turn-by-turn / salvo shot coordinates, outcomes, AI modes, and winner.
 
 ### `GET /api/benchmark`
 - Query parameters:
   - `games`: Number of games per strategy (default: 200, max: 5000)
-  - `ruleset`: `standard`, `salvo`, or `silent` (default: `standard`)
+  - `ruleset`: `standard`, `salvo`, `silent`, or `salvo_silent` (default: `standard`)
   - `seed`: 64-bit integer seed (optional)
 - Response: `application/json` with 13-attack and 7-defense distributions, 13x13 attack matrix, 7x13 survival matrix, and 7x7 defense tournament standings.
 

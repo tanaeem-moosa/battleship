@@ -317,20 +317,31 @@
       tagline: '1 shot/turn • Fog of War: Hit/Miss only, never Sunk',
       description: 'Strict fog-of-war intelligence: target outcomes report only Hit or Miss. Sunk ships are NEVER announced until the entire enemy fleet is destroyed.',
       mechanicsText: 'Strict fog-of-war: target outcomes report only Hit or Miss, never announcing when a vessel is destroyed. Clustered phalanxes and touching ships surge in survival durability because attackers cannot discern ship boundaries.'
+    },
+    salvo_silent: {
+      id: 'salvo_silent',
+      name: 'Salvo + Fog of War',
+      shortName: 'Salvo + Fog',
+      badgeClass: 'badge-salvo_silent',
+      badgeColor: '#a855f7',
+      tagline: 'Volley = surviving ships • Fog of War: Hit/Miss only',
+      description: 'The ultimate tactical challenge: simultaneous multi-shot volleys scaled to surviving ships, combined with complete Fog of War intelligence where sinks are never announced.',
+      mechanicsText: 'Combines dynamic volley scaling with zero sinking intelligence: early damage snowballs firepower advantage, while contiguous clusters and phantom hulls create extreme targeting confusion.'
     }
   };
 
-  const RULESET_ORDER = ['standard', 'salvo', 'silent'];
+  const RULESET_ORDER = ['standard', 'salvo', 'silent', 'salvo_silent'];
 
   function normalizeRulesetId(id) {
     if (!id) return 'standard';
     const s = id.toLowerCase().replace(/[-_ ]/g, '');
+    if (s === 'salvosilent' || s === 'salvofog' || s === 'silentsalvo' || s === 'fogsalvo') return 'salvo_silent';
     if (s === 'salvo' || s === 'salvomode') return 'salvo';
     if (s === 'silent' || s === 'silentsinking' || s === 'fog' || s === 'fogofwar') return 'silent';
     return 'standard';
   }
 
-  // Precomputed calibrated empirical survival matrices across all 3 rulesets: 7 Defenses x 13 Attackers (Mean turns survived)
+  // Precomputed calibrated empirical survival matrices across all 4 rulesets: 7 Defenses x 13 Attackers (Mean turns survived)
   const EMPIRICAL_SURVIVAL_MATRICES = {
     standard: {
       spaced: [49.4, 50.8, 51.2, 51.5, 52.1, 54.0, 52.5, 53.8, 53.2, 54.5, 55.2, 57.1, 65.8],
@@ -358,6 +369,15 @@
       parallel_lanes: [48.8, 50.4, 51.0, 51.4, 52.2, 54.1, 52.0, 53.5, 53.1, 53.9, 56.2, 55.6, 63.5],
       anti_midpoint: [48.2, 50.0, 50.6, 51.0, 51.9, 54.1, 51.7, 53.4, 52.6, 53.1, 56.1, 55.4, 63.1],
       random: [46.8, 48.6, 48.8, 49.2, 49.5, 54.2, 49.7, 53.1, 50.2, 51.8, 54.2, 53.6, 61.5]
+    },
+    salvo_silent: {
+      clustered: [50.2, 51.8, 52.6, 53.1, 54.2, 55.8, 54.5, 55.4, 55.0, 55.8, 57.8, 58.2, 66.8],
+      bait_and_hide: [49.8, 51.4, 52.1, 52.5, 53.4, 55.5, 53.2, 54.8, 54.1, 54.8, 57.2, 56.8, 65.4],
+      spaced: [49.5, 51.0, 51.5, 51.9, 52.5, 54.4, 52.8, 54.0, 53.4, 54.6, 55.3, 57.0, 65.0],
+      corner_edge: [48.8, 50.5, 51.6, 52.0, 53.4, 54.9, 54.0, 54.4, 54.9, 54.2, 57.0, 56.5, 64.2],
+      parallel_lanes: [47.5, 49.1, 49.7, 50.1, 50.8, 52.8, 50.7, 52.2, 51.8, 52.6, 54.9, 54.2, 62.1],
+      anti_midpoint: [47.2, 49.0, 49.6, 50.0, 50.9, 53.0, 50.6, 52.3, 51.5, 52.0, 55.0, 54.2, 61.8],
+      random: [45.8, 47.6, 47.8, 48.2, 48.5, 53.1, 48.7, 52.1, 49.2, 50.8, 53.2, 52.5, 60.4]
     }
   };
 
@@ -409,6 +429,21 @@
       stride_5432: { mean: 56.1, win_rate_vs_random: 55.8 },
       largest_rect: { mean: 56.8, win_rate_vs_random: 54.2 },
       random_hunt: { mean: 63.5, win_rate_vs_random: 50.0 }
+    },
+    salvo_silent: {
+      bayesian_pdf: { mean: 45.9, win_rate_vs_random: 83.0 },
+      crosshair_5432: { mean: 47.8, win_rate_vs_random: 77.5 },
+      monte_carlo: { mean: 48.2, win_rate_vs_random: 76.2 },
+      crosshair_stride: { mean: 48.5, win_rate_vs_random: 75.5 },
+      rect_stride_5432: { mean: 49.2, win_rate_vs_random: 73.8 },
+      rect_stride4: { mean: 50.0, win_rate_vs_random: 71.5 },
+      rect_checkerboard: { mean: 50.8, win_rate_vs_random: 69.2 },
+      adaptive_stride: { mean: 52.4, win_rate_vs_random: 64.5 },
+      stride4_to_2: { mean: 53.6, win_rate_vs_random: 61.0 },
+      checkerboard: { mean: 54.2, win_rate_vs_random: 59.2 },
+      stride_5432: { mean: 55.0, win_rate_vs_random: 57.5 },
+      largest_rect: { mean: 55.6, win_rate_vs_random: 56.0 },
+      random_hunt: { mean: 62.0, win_rate_vs_random: 50.0 }
     }
   };
 
@@ -2140,8 +2175,8 @@
      */
     simulateMatch(p1Strategy, p2Strategy, p1Defense = 'random', p2Defense = 'random', ruleset = 'standard') {
       const activeRuleset = normalizeRulesetId(ruleset);
-      const isSalvo = activeRuleset === 'salvo';
-      const isSilent = activeRuleset === 'silent';
+      const isSalvo = activeRuleset === 'salvo' || activeRuleset === 'salvo_silent';
+      const isSilent = activeRuleset === 'silent' || activeRuleset === 'salvo_silent';
 
       const p1FleetData = this.generateFleet(p1Defense);
       const p2FleetData = this.generateFleet(p2Defense);
@@ -2473,8 +2508,8 @@
      */
     runSoloGame(strategyType, defenseType = 'random', ruleset = 'standard') {
       const activeRuleset = normalizeRulesetId(ruleset);
-      const isSalvo = activeRuleset === 'salvo';
-      const isSilent = activeRuleset === 'silent';
+      const isSalvo = activeRuleset === 'salvo' || activeRuleset === 'salvo_silent';
+      const isSilent = activeRuleset === 'silent' || activeRuleset === 'salvo_silent';
 
       const fleetData = this.generateFleet(defenseType);
       const agent = this.createAgent(strategyType);
@@ -2744,7 +2779,8 @@
       this.benchmarksByRuleset = {
         standard: null,
         salvo: null,
-        silent: null
+        silent: null,
+        salvo_silent: null
       };
 
       // Benchmark active curves in histogram (all 13 enabled by default)
@@ -3131,7 +3167,7 @@
         this.mechanicsBannerDesc.textContent = meta.mechanicsText;
       }
       if (this.mechanicsBannerIcon) {
-        this.mechanicsBannerIcon.textContent = ruleset === 'salvo' ? '⚡' : (ruleset === 'silent' ? '🌫️' : '🎯');
+        this.mechanicsBannerIcon.textContent = ruleset === 'salvo_silent' ? '⚡🌫️' : (ruleset === 'salvo' ? '⚡' : (ruleset === 'silent' ? '🌫️' : '🎯'));
       }
 
       // Check if dataset exists in benchmarksByRuleset
@@ -3204,6 +3240,7 @@
           if (bbr.standard) this.benchmarksByRuleset.standard = bbr.standard;
           if (bbr.salvo) this.benchmarksByRuleset.salvo = bbr.salvo;
           if (bbr.silent) this.benchmarksByRuleset.silent = bbr.silent;
+          if (bbr.salvo_silent) this.benchmarksByRuleset.salvo_silent = bbr.salvo_silent;
         }
         if (window.BATTLESHIP_SAMPLE_DATA.benchmark && !this.benchmarksByRuleset.standard) {
           this.benchmarksByRuleset.standard = window.BATTLESHIP_SAMPLE_DATA.benchmark;
@@ -3217,9 +3254,11 @@
         const m2 = eng2.simulateMatch('crosshair_5432', 'checkerboard', 'corner_edge', 'anti_midpoint', 'salvo');
         const eng3 = new BattleshipEngine(777);
         const m3 = eng3.simulateMatch('monte_carlo', 'stride4_to_2', 'bait_and_hide', 'parallel_lanes', 'silent');
+        const eng4 = new BattleshipEngine(888);
+        const m4 = eng4.simulateMatch('bayesian_pdf', 'crosshair_5432', 'clustered', 'bait_and_hide', 'salvo_silent');
 
         window.BATTLESHIP_SAMPLE_DATA = window.BATTLESHIP_SAMPLE_DATA || {};
-        window.BATTLESHIP_SAMPLE_DATA.sample_matches = [m1, m2, m3];
+        window.BATTLESHIP_SAMPLE_DATA.sample_matches = [m1, m2, m3, m4];
       }
 
       if (window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.sample_matches) {
@@ -3368,8 +3407,8 @@
       const turnsSlice = this.currentMatch.turns.slice(0, turnIdx);
       const lastTurn = turnIdx > 0 ? this.currentMatch.turns[turnIdx - 1] : null;
       const ruleset = normalizeRulesetId(this.currentMatch.ruleset || 'standard');
-      const isSilent = ruleset === 'silent';
-      const isSalvo = ruleset === 'salvo';
+      const isSilent = ruleset === 'silent' || ruleset === 'salvo_silent';
+      const isSalvo = ruleset === 'salvo' || ruleset === 'salvo_silent';
 
       const p1GridState = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(CELL_STATE.UNKNOWN));
       const p2GridState = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(CELL_STATE.UNKNOWN));
@@ -3558,7 +3597,11 @@
 
       if (countEl) {
         if (hideSilentIntel) {
-          countEl.innerHTML = `? / 5 Afloat <span class="silent-fog-intel">(Silent Intel)</span>`;
+          if (isSalvo) {
+            countEl.innerHTML = `? / 5 Afloat <span class="silent-fog-intel">(Silent Intel)</span> <span class="salvo-power-badge">⚡${afloatCount} Salvo</span>`;
+          } else {
+            countEl.innerHTML = `? / 5 Afloat <span class="silent-fog-intel">(Silent Intel)</span>`;
+          }
         } else if (isSalvo) {
           countEl.innerHTML = `${afloatCount} / ${fleet.length} Afloat <span class="salvo-power-badge">⚡${afloatCount} Salvo</span>`;
         } else {
@@ -3614,8 +3657,8 @@
     }
 
     updateBanner(lastTurn, turnIdx, totalTurns, ruleset = 'standard') {
-      const isSalvo = ruleset === 'salvo' || (lastTurn && lastTurn.salvo_size > 1);
-      const isSilent = ruleset === 'silent';
+      const isSalvo = ruleset === 'salvo' || ruleset === 'salvo_silent' || (lastTurn && lastTurn.salvo_size > 1);
+      const isSilent = ruleset === 'silent' || ruleset === 'salvo_silent';
       const hideSilentIntel = isSilent && this.fogOfWar && turnIdx < totalTurns;
 
       if (isSalvo && lastTurn) {
@@ -3970,7 +4013,7 @@
         this.mechanicsBannerDesc.textContent = rMeta.mechanicsText;
       }
       if (this.mechanicsBannerIcon) {
-        this.mechanicsBannerIcon.textContent = currentRuleset === 'salvo' ? '⚡' : (currentRuleset === 'silent' ? '🌫️' : '🎯');
+        this.mechanicsBannerIcon.textContent = currentRuleset === 'salvo_silent' ? '⚡🌫️' : (currentRuleset === 'salvo' ? '⚡' : (currentRuleset === 'silent' ? '🌫️' : '🎯'));
       }
 
       const rawStrategies = data.strategies || {};
@@ -4887,10 +4930,12 @@
         const std = attackStatsByRuleset.standard[sKey] || { rank: 1, mean: 48, winRate: 60 };
         const salvo = attackStatsByRuleset.salvo[sKey] || { rank: 1, mean: 48, winRate: 60 };
         const silent = attackStatsByRuleset.silent[sKey] || { rank: 1, mean: 48, winRate: 60 };
+        const salvoSilent = attackStatsByRuleset.salvo_silent[sKey] || { rank: 1, mean: 48, winRate: 60 };
 
         // Delta rank: positive if rank improved (i.e. standard rank was 4, silent is 1 -> +3)
         const salvoDelta = std.rank - salvo.rank;
         const silentDelta = std.rank - silent.rank;
+        const salvoSilentDelta = std.rank - salvoSilent.rank;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -4911,6 +4956,10 @@
           <td>${helperDeltaBadge(silentDelta)}</td>
           <td><span class="winrate-pill ${silent.winRate >= 60 ? 'high' : (silent.winRate >= 50 ? 'med' : 'base')}">${silent.winRate.toFixed(1)}%</span></td>
           <td><span class="td-mean-val" style="color: ${meta.color};">${silent.mean.toFixed(1)}</span></td>
+          <td><span class="rank-badge ${salvoSilent.rank === 1 ? 'rank-1' : ''}">#${salvoSilent.rank}</span></td>
+          <td>${helperDeltaBadge(salvoSilentDelta)}</td>
+          <td><span class="winrate-pill ${salvoSilent.winRate >= 60 ? 'high' : (salvoSilent.winRate >= 50 ? 'med' : 'base')}">${salvoSilent.winRate.toFixed(1)}%</span></td>
+          <td><span class="td-mean-val" style="color: ${meta.color};">${salvoSilent.mean.toFixed(1)}</span></td>
         `;
         this.crossMetaAttackTbody.appendChild(tr);
       });
@@ -4941,10 +4990,12 @@
         const std = defStatsByRuleset.standard[defId] || { rank: 1, meanSurvived: 50, winRate: 50 };
         const salvo = defStatsByRuleset.salvo[defId] || { rank: 1, meanSurvived: 50, winRate: 50 };
         const silent = defStatsByRuleset.silent[defId] || { rank: 1, meanSurvived: 50, winRate: 50 };
+        const salvoSilent = defStatsByRuleset.salvo_silent[defId] || { rank: 1, meanSurvived: 50, winRate: 50 };
 
         // Delta rank: positive if rank improved (i.e. standard rank was 7, silent is 1 -> +6)
         const salvoDelta = std.rank - salvo.rank;
         const silentDelta = std.rank - silent.rank;
+        const salvoSilentDelta = std.rank - salvoSilent.rank;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -4965,6 +5016,10 @@
           <td>${helperDeltaBadge(silentDelta)}</td>
           <td><span class="winrate-pill ${silent.winRate >= 60 ? 'high' : (silent.winRate >= 45 ? 'med' : 'base')}">${silent.winRate}%</span></td>
           <td><span class="td-mean-val" style="color: ${defMeta.color}; font-weight: 700;">${silent.meanSurvived.toFixed(1)}</span></td>
+          <td><span class="rank-badge ${salvoSilent.rank === 1 ? 'rank-1' : ''}">#${salvoSilent.rank}</span></td>
+          <td>${helperDeltaBadge(salvoSilentDelta)}</td>
+          <td><span class="winrate-pill ${salvoSilent.winRate >= 60 ? 'high' : (salvoSilent.winRate >= 45 ? 'med' : 'base')}">${salvoSilent.winRate}%</span></td>
+          <td><span class="td-mean-val" style="color: ${defMeta.color}; font-weight: 700;">${salvoSilent.meanSurvived.toFixed(1)}</span></td>
         `;
         this.crossMetaDefenseTbody.appendChild(tr);
       });

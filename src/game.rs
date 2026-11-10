@@ -209,6 +209,7 @@ pub enum Ruleset {
     Standard,
     Salvo,
     SilentSinking,
+    SalvoSilent,
 }
 
 impl Default for Ruleset {
@@ -218,13 +219,19 @@ impl Default for Ruleset {
 }
 
 impl Ruleset {
-    pub const ALL: [Ruleset; 3] = [Ruleset::Standard, Ruleset::Salvo, Ruleset::SilentSinking];
+    pub const ALL: [Ruleset; 4] = [
+        Ruleset::Standard,
+        Ruleset::Salvo,
+        Ruleset::SilentSinking,
+        Ruleset::SalvoSilent,
+    ];
 
     pub fn id(self) -> &'static str {
         match self {
             Ruleset::Standard => "standard",
             Ruleset::Salvo => "salvo",
             Ruleset::SilentSinking => "silent",
+            Ruleset::SalvoSilent => "salvo_silent",
         }
     }
 
@@ -233,6 +240,7 @@ impl Ruleset {
             Ruleset::Standard => "Standard Hasbro",
             Ruleset::Salvo => "Salvo Mode",
             Ruleset::SilentSinking => "Silent Sinking",
+            Ruleset::SalvoSilent => "Salvo + Fog of War",
         }
     }
 
@@ -241,16 +249,19 @@ impl Ruleset {
             "standard" | "hasbro" | "classic" => Some(Ruleset::Standard),
             "salvo" | "volley" => Some(Ruleset::Salvo),
             "silent" | "silent_sinking" | "fog" | "fog_of_war" => Some(Ruleset::SilentSinking),
+            "salvo_silent" | "salvo_fog" | "silent_salvo" | "salvo+silent" | "salvo_fog_of_war" => {
+                Some(Ruleset::SalvoSilent)
+            }
             _ => None,
         }
     }
 
     pub fn is_salvo(self) -> bool {
-        matches!(self, Ruleset::Salvo)
+        matches!(self, Ruleset::Salvo | Ruleset::SalvoSilent)
     }
 
     pub fn is_silent_sinking(self) -> bool {
-        matches!(self, Ruleset::SilentSinking)
+        matches!(self, Ruleset::SilentSinking | Ruleset::SalvoSilent)
     }
 }
 
@@ -923,12 +934,20 @@ mod tests {
         assert_eq!(Ruleset::from_id("volley"), Some(Ruleset::Salvo));
         assert_eq!(Ruleset::from_id("silent"), Some(Ruleset::SilentSinking));
         assert_eq!(Ruleset::from_id("fog_of_war"), Some(Ruleset::SilentSinking));
+        assert_eq!(Ruleset::from_id("salvo_silent"), Some(Ruleset::SalvoSilent));
+        assert_eq!(Ruleset::from_id("salvo_fog"), Some(Ruleset::SalvoSilent));
+        assert_eq!(Ruleset::from_id("silent_salvo"), Some(Ruleset::SalvoSilent));
+        assert_eq!(Ruleset::from_id("salvo+silent"), Some(Ruleset::SalvoSilent));
+        assert_eq!(Ruleset::from_id("salvo_fog_of_war"), Some(Ruleset::SalvoSilent));
         assert_eq!(Ruleset::from_id("invalid"), None);
 
         assert!(Ruleset::Salvo.is_salvo());
         assert!(!Ruleset::Standard.is_salvo());
         assert!(Ruleset::SilentSinking.is_silent_sinking());
         assert!(!Ruleset::Standard.is_silent_sinking());
+
+        assert!(Ruleset::SalvoSilent.is_salvo());
+        assert!(Ruleset::SalvoSilent.is_silent_sinking());
     }
 
     #[test]

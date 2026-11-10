@@ -159,7 +159,7 @@ pub fn simulate_game_with_ruleset(
             let mut volley_results = Vec::new();
             for shot in salvo {
                 shots += 1;
-                let outcome = board.receive_shot_with_ruleset(shot.0, shot.1, Ruleset::Salvo);
+                let outcome = board.receive_shot_with_ruleset(shot.0, shot.1, ruleset);
                 volley_results.push((shot, outcome));
                 if board.all_sunk() || shots >= 100 {
                     break;
@@ -242,7 +242,7 @@ pub fn simulate_match_with_ruleset(
             for (idx, shot) in salvo1.into_iter().enumerate() {
                 turn_seq += 1;
                 p1_shots += 1;
-                let outcome = p2_board.receive_shot_with_ruleset(shot.0, shot.1, Ruleset::Salvo);
+                let outcome = p2_board.receive_shot_with_ruleset(shot.0, shot.1, ruleset);
                 if outcome.is_hit_or_sunk() {
                     p1_hits += 1;
                 } else {
@@ -298,7 +298,7 @@ pub fn simulate_match_with_ruleset(
             for (idx, shot) in salvo2.into_iter().enumerate() {
                 turn_seq += 1;
                 p2_shots += 1;
-                let outcome = p1_board.receive_shot_with_ruleset(shot.0, shot.1, Ruleset::Salvo);
+                let outcome = p1_board.receive_shot_with_ruleset(shot.0, shot.1, ruleset);
                 if outcome.is_hit_or_sunk() {
                     p2_hits += 1;
                 } else {
@@ -1493,10 +1493,21 @@ pub fn print_cross_ruleset_summary(reports: &[BenchmarkReport]) {
     println!("=========================================================================================================");
     println!();
     println!("ATTACK STRATEGIES CROSS-RULESET PERFORMANCE (Solo Mean Shots & Tournament Win %):");
-    println!("+----+-----------------------------------+--------------------+--------------------+--------------------+");
-    println!("| #  | Strategy                          | Standard Hasbro    | Salvo Mode         | Silent Sinking     |");
-    println!("|    |                                   |  Mean   |  Win %   |  Mean   |  Win %   |  Mean   |  Win %   |");
-    println!("+----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+
+    let mut att_div = String::from("+----+-----------------------------------+");
+    let mut att_h1 = String::from("| #  | Strategy                          |");
+    let mut att_h2 = String::from("|    |                                   |");
+    for r in reports {
+        att_div.push_str("---------+----------+");
+        att_h1.push_str(&format!(" {:^18} |", r.ruleset.name()));
+        att_h2.push_str("  Mean   |  Win %   |");
+    }
+
+    println!("{}", att_div);
+    println!("{}", att_h1);
+    println!("{}", att_h2);
+    println!("{}", att_div);
+
     for i in 0..NUM_STRATEGIES {
         let name = &reports[0].strategies[i].name;
         print!("| {:>2} | {:<33} |", i + 1, name);
@@ -1513,13 +1524,25 @@ pub fn print_cross_ruleset_summary(reports: &[BenchmarkReport]) {
         }
         println!();
     }
-    println!("+----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+    println!("{}", att_div);
     println!();
+
     println!("DEFENSE STRATEGIES CROSS-RULESET PERFORMANCE (Survival Mean & Tournament Win %):");
-    println!("+-----+-----------------------------------+--------------------+--------------------+--------------------+");
-    println!("|  #  | Defense Strategy                  | Standard Hasbro    | Salvo Mode         | Silent Sinking     |");
-    println!("|     |                                   |  Surv   |  Win %   |  Surv   |  Win %   |  Surv   |  Win %   |");
-    println!("+-----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+
+    let mut def_div = String::from("+-----+-----------------------------------+");
+    let mut def_h1 = String::from("|  #  | Defense Strategy                  |");
+    let mut def_h2 = String::from("|     |                                   |");
+    for r in reports {
+        def_div.push_str("---------+----------+");
+        def_h1.push_str(&format!(" {:^18} |", r.ruleset.name()));
+        def_h2.push_str("  Surv   |  Win %   |");
+    }
+
+    println!("{}", def_div);
+    println!("{}", def_h1);
+    println!("{}", def_h2);
+    println!("{}", def_div);
+
     for d in 0..NUM_DEFENSES {
         let name = &reports[0].defense_eval.defense_names[d];
         let def_id = &reports[0].defense_eval.defense_ids[d];
@@ -1538,7 +1561,7 @@ pub fn print_cross_ruleset_summary(reports: &[BenchmarkReport]) {
         }
         println!();
     }
-    println!("+-----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+    println!("{}", def_div);
     println!("=========================================================================================================");
 }
 
@@ -1689,5 +1712,38 @@ mod tests {
         let json = report.to_json();
         assert!(json.contains("\"ruleset\":\"silent\""));
         assert!(json.contains("\"ruleset_name\":\"Silent Sinking\""));
+    }
+
+    #[test]
+    fn test_salvo_silent_match_properties() {
+        let mut p1_att = CrosshairStrideAttack::new();
+        let mut p1_def = SpacedDefense::new();
+        let mut p2_att = CrosshairDescendingAttack::new();
+        let mut p2_def = BaitAndHideDefense::new();
+
+        let replay = simulate_match_with_ruleset(
+            "SalvoSilentP1",
+            &mut p1_att,
+            &mut p1_def,
+            "SalvoSilentP2",
+            &mut p2_att,
+            &mut p2_def,
+            Ruleset::SalvoSilent,
+            555,
+        );
+
+        assert_eq!(replay.ruleset, Ruleset::SalvoSilent);
+        assert!(!replay.moves.is_empty());
+        for m in &replay.moves {
+            assert!(!matches!(m.outcome, ShotOutcome::Sunk(_)));
+            assert!(m.sunk_cells.is_none());
+            assert!(m.salvo_shot >= 1);
+            assert!(m.salvo_size >= 1 && m.salvo_size <= 5);
+            assert!(m.salvo_shot <= m.salvo_size);
+        }
+
+        let json = replay.to_json();
+        assert!(json.contains("\"ruleset\":\"salvo_silent\""));
+        assert!(json.contains("\"ruleset_name\":\"Salvo + Fog of War\""));
     }
 }

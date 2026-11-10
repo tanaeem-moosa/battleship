@@ -17,7 +17,7 @@ use battleship::sim::{
 
 fn print_help() {
     println!(
-        r#"Battleship Simulator Engine (Standard Hasbro, Salvo Mode & Silent Sinking Rules)
+        r#"Battleship Simulator Engine (Standard Hasbro, Salvo Mode, Silent Sinking & Salvo+Fog Rules)
 
 USAGE:
     cargo run -- [SUBCOMMAND] [OPTIONS]
@@ -31,13 +31,13 @@ SUBCOMMANDS:
                           - 7x7 Defense Head-to-Head Tournament & Overall Defense Standings
                         Prints summary tables & ASCII histograms to stdout, and writes `viewer/sample_data.js`.
                         Options:
-                          --ruleset <R>  Ruleset to simulate: all, standard, salvo, silent (default: all)
+                          --ruleset <R>  Ruleset to simulate: all, standard, salvo, silent, salvo_silent (default: all)
                           --games <N>    Number of games per strategy (default: 1000)
                           --seed <S>     PRNG seed for reproducible results (default: 42)
 
     match               Simulate a single head-to-head match and print JSON to stdout.
                         Options:
-                          --ruleset <R>  Ruleset: standard, salvo, silent (default: standard)
+                          --ruleset <R>  Ruleset: standard, salvo, silent, salvo_silent (default: standard)
                           --p1 <STRAT>   Player 1 attack strategy (default: random_hunt)
                           --p2 <STRAT>   Player 2 attack strategy (default: checkerboard)
                                          Attack Strategies:
@@ -151,9 +151,11 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         ("Crosshair Stride + Open-Target", "crosshair_stride", "bait_and_hide", "Bayesian Probability Density", "bayesian_pdf", "spaced", seed + 808, Ruleset::Standard),
         ("Crosshair Stride (5->4->3->2)", "crosshair_5432", "corner_edge", "Monte Carlo Sampling", "monte_carlo", "anti_midpoint", seed + 909, Ruleset::Salvo),
         ("Bayesian Probability Density", "bayesian_pdf", "spaced", "Monte Carlo Sampling", "monte_carlo", "anti_midpoint", seed + 505, Ruleset::SilentSinking),
+        ("Crosshair Stride (5->4->3->2)", "crosshair_5432", "parallel_lanes", "Bayesian Probability Density", "bayesian_pdf", "spaced", seed + 404, Ruleset::SalvoSilent),
         ("Bayesian Probability Density", "bayesian_pdf", "corner_edge", "Largest Rect + Stride (4->2)", "rect_stride4", "clustered", seed + 101, Ruleset::Standard),
         ("Monte Carlo Sampling", "monte_carlo", "bait_and_hide", "Largest Rect + Stride (5->4->3->2)", "rect_stride_5432", "spaced", seed + 606, Ruleset::Salvo),
         ("Descending Stride (5->4->3->2)", "stride_5432", "parallel_lanes", "Largest Rect + Checkerboard", "rect_checkerboard", "corner_edge", seed + 707, Ruleset::SilentSinking),
+        ("Monte Carlo Sampling", "monte_carlo", "clustered", "Crosshair Stride + Open-Target", "crosshair_stride", "bait_and_hide", seed + 333, Ruleset::SalvoSilent),
         ("Largest Rect + Stride (4->2)", "rect_stride4", "anti_midpoint", "Staggered Stride (4->2)", "stride4_to_2", "bait_and_hide", seed + 777, Ruleset::Standard),
         ("Staggered Stride (4->2)", "stride4_to_2", "clustered", "Adaptive Stride (2->3->4->5)", "adaptive_stride", "parallel_lanes", seed + 202, Ruleset::Salvo),
         ("Largest Empty Rect Midpoint", "largest_rect", "spaced", "Checkerboard + Hunt/Target", "checkerboard", "corner_edge", seed + 303, Ruleset::SilentSinking),
@@ -182,25 +184,35 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if ruleset_arg == "all" {
         println!("Running complete Battleship benchmark suite across ALL rulesets ({} games per strategy, seed {})...", games, seed);
 
-        println!("\n>>> 1/3: Running Standard Hasbro Ruleset...");
+        println!("\n>>> 1/4: Running Standard Hasbro Ruleset...");
         let std_report = run_benchmark_with_ruleset(games, seed, Ruleset::Standard);
         print_benchmark_summary(&std_report);
 
-        println!("\n>>> 2/3: Running Salvo Mode Ruleset...");
+        println!("\n>>> 2/4: Running Salvo Mode Ruleset...");
         let salvo_report = run_benchmark_with_ruleset(games, seed, Ruleset::Salvo);
         print_benchmark_summary(&salvo_report);
 
-        println!("\n>>> 3/3: Running Silent Sinking (Fog of War) Ruleset...");
+        println!("\n>>> 3/4: Running Silent Sinking (Fog of War) Ruleset...");
         let silent_report = run_benchmark_with_ruleset(games, seed, Ruleset::SilentSinking);
         print_benchmark_summary(&silent_report);
 
-        let reports = [std_report.clone(), salvo_report.clone(), silent_report.clone()];
+        println!("\n>>> 4/4: Running Salvo + Fog of War Ruleset...");
+        let salvo_silent_report = run_benchmark_with_ruleset(games, seed, Ruleset::SalvoSilent);
+        print_benchmark_summary(&salvo_silent_report);
+
+        let reports = [
+            std_report.clone(),
+            salvo_report.clone(),
+            silent_report.clone(),
+            salvo_silent_report.clone(),
+        ];
         print_cross_ruleset_summary(&reports);
 
         let reports_by_ruleset = [
             (Ruleset::Standard, std_report.clone()),
             (Ruleset::Salvo, salvo_report),
             (Ruleset::SilentSinking, silent_report),
+            (Ruleset::SalvoSilent, salvo_silent_report),
         ];
 
         if let Err(e) = write_sample_data_file(&std_report, &reports_by_ruleset, &sample_matches) {
