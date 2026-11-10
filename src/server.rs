@@ -15,10 +15,11 @@ use std::path::{Path, PathBuf};
 use crate::rng::Rng;
 use crate::sim::{run_benchmark, simulate_match};
 use crate::strategy::{
-    AdaptiveStrideUpAttack, AttackStrategy, BayesianPdfAttack, CheckerboardAttack,
+    AdaptiveStrideUpAttack, AntiMidpointDefense, AttackStrategy, BaitAndHideDefense,
+    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense, DefenseStrategy,
     DescendingStrideAttack, HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack,
-    RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack, RectStrideFourAttack,
-    StaggeredFourToTwoAttack,
+    ParallelLanesDefense, RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack,
+    RectStrideFourAttack, SpacedDefense, StaggeredFourToTwoAttack,
 };
 
 /// Instantiate an attack strategy from its CLI / URL string identifier.
@@ -71,6 +72,44 @@ pub fn create_strategy(id: &str) -> (Box<dyn AttackStrategy>, &'static str) {
         _ => (
             Box::new(BayesianPdfAttack::new()),
             "Bayesian Probability Density",
+        ),
+    }
+}
+
+/// Instantiate a defense strategy from its CLI / URL string identifier.
+pub fn create_defense(id: &str) -> (Box<dyn DefenseStrategy>, &'static str) {
+    match id.to_ascii_lowercase().as_str() {
+        "random" | "uniform" | "uniform_random" => (
+            Box::new(RandomDefense::new()),
+            "Uniform Random",
+        ),
+        "spaced" | "no_touch" | "spaced_defense" => (
+            Box::new(SpacedDefense::new()),
+            "Spaced (No-Touching)",
+        ),
+        "corner_edge" | "corner" | "edge" | "corners" => (
+            Box::new(CornerEdgeDefense::new()),
+            "Corner & Edge Hugging",
+        ),
+        "clustered" | "phalanx" | "cluster" => (
+            Box::new(ClusteredDefense::new()),
+            "Tightly Clustered Phalanx",
+        ),
+        "anti_midpoint" | "midpoint_dodger" | "bisection_dodger" => (
+            Box::new(AntiMidpointDefense::new()),
+            "Anti-Midpoint (Bisection Dodger)",
+        ),
+        "bait_and_hide" | "bait" | "corner_destroyer" => (
+            Box::new(BaitAndHideDefense::new()),
+            "Bait Capital + Corner Destroyer",
+        ),
+        "parallel_lanes" | "lanes" | "parallel" => (
+            Box::new(ParallelLanesDefense::new()),
+            "Parallel Lanes (Single Axis)",
+        ),
+        _ => (
+            Box::new(RandomDefense::new()),
+            "Uniform Random",
         ),
     }
 }
@@ -188,6 +227,8 @@ fn handle_api_match(
 ) -> std::io::Result<()> {
     let p1_id = query.get("p1").map(|s| s.as_str()).unwrap_or("random_hunt");
     let p2_id = query.get("p2").map(|s| s.as_str()).unwrap_or("checkerboard");
+    let d1_id = query.get("d1").map(|s| s.as_str()).unwrap_or("random");
+    let d2_id = query.get("d2").map(|s| s.as_str()).unwrap_or("random");
 
     let seed = query
         .get("seed")
@@ -196,16 +237,16 @@ fn handle_api_match(
 
     let (mut p1_att, p1_name) = create_strategy(p1_id);
     let (mut p2_att, p2_name) = create_strategy(p2_id);
-    let mut p1_def = RandomDefense::new();
-    let mut p2_def = RandomDefense::new();
+    let (mut p1_def, _) = create_defense(d1_id);
+    let (mut p2_def, _) = create_defense(d2_id);
 
     let replay = simulate_match(
         p1_name,
         p1_att.as_mut(),
-        &mut p1_def,
+        p1_def.as_mut(),
         p2_name,
         p2_att.as_mut(),
-        &mut p2_def,
+        p2_def.as_mut(),
         seed,
     );
 
@@ -393,5 +434,36 @@ mod tests {
         let (s11, name11) = create_strategy("bayesian_pdf");
         assert_eq!(name11, "Bayesian Probability Density");
         assert_eq!(s11.current_mode(), "bayesian_pdf");
+    }
+
+    #[test]
+    fn test_create_defense() {
+        let (d1, name1) = create_defense("random");
+        assert_eq!(name1, "Uniform Random");
+        assert_eq!(d1.id(), "random");
+
+        let (d2, name2) = create_defense("spaced");
+        assert_eq!(name2, "Spaced (No-Touching)");
+        assert_eq!(d2.id(), "spaced");
+
+        let (d3, name3) = create_defense("corner_edge");
+        assert_eq!(name3, "Corner & Edge Hugging");
+        assert_eq!(d3.id(), "corner_edge");
+
+        let (d4, name4) = create_defense("clustered");
+        assert_eq!(name4, "Tightly Clustered Phalanx");
+        assert_eq!(d4.id(), "clustered");
+
+        let (d5, name5) = create_defense("anti_midpoint");
+        assert_eq!(name5, "Anti-Midpoint (Bisection Dodger)");
+        assert_eq!(d5.id(), "anti_midpoint");
+
+        let (d6, name6) = create_defense("bait_and_hide");
+        assert_eq!(name6, "Bait Capital + Corner Destroyer");
+        assert_eq!(d6.id(), "bait_and_hide");
+
+        let (d7, name7) = create_defense("parallel_lanes");
+        assert_eq!(name7, "Parallel Lanes (Single Axis)");
+        assert_eq!(d7.id(), "parallel_lanes");
     }
 }

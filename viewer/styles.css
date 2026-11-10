@@ -42,6 +42,15 @@
   --color-monte-carlo: #e11d48;
   --color-bayesian-pdf: #eab308;
 
+  /* 7 Defense Strategy Distinct Colors */
+  --def-random: #94a3b8;
+  --def-spaced: #38bdf8;
+  --def-corner-edge: #a855f7;
+  --def-clustered: #f97316;
+  --def-anti-midpoint: #10b981;
+  --def-bait-and-hide: #ec4899;
+  --def-parallel-lanes: #eab308;
+
   /* Ship Colors */
   --ship-carrier: #0ea5e9;
   --ship-battleship: #3b82f6;
@@ -318,6 +327,55 @@ body.command-center-theme {
   letter-spacing: 0.05em;
 }
 
+/* Player Config Box */
+.player-config-box {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.player-config-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.player-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.player-indicator-dot.p1-dot {
+  background: var(--cyan-primary);
+  box-shadow: 0 0 6px var(--cyan-glow);
+}
+.player-indicator-dot.p2-dot {
+  background: var(--hit-orange);
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.6);
+}
+
+.player-config-title {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+
+.player-config-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.player-config-inputs .control-group {
+  margin: 0;
+}
+
 .vs-divider {
   font-family: var(--font-display);
   font-weight: 700;
@@ -523,6 +581,23 @@ body.command-center-theme {
   padding: 0.15rem 0.45rem;
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
+}
+
+.player-badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.player-defense-badge {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
 }
 
 .ai-state-indicator {
@@ -1970,6 +2045,253 @@ body.command-center-theme {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
+}
+
+/* ==========================================================================
+   BENCHMARK LAB SUB-NAVIGATION (ATTACK VS DEFENSE)
+   ========================================================================== */
+
+.benchmark-subnav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  width: fit-content;
+}
+
+.subtab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  padding: 0.5rem 1.1rem;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.subtab-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.subtab-btn.active {
+  background: var(--bg-panel-elevated);
+  color: var(--cyan-primary);
+  border-color: var(--border-bright);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+}
+
+.subtab-btn.defense-subtab.active {
+  color: #a855f7;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
+}
+
+.benchmark-subpanel {
+  display: none;
+}
+.benchmark-subpanel.active-subpanel {
+  display: block;
+}
+
+/* ==========================================================================
+   DEFENSE BENCHMARK & 7x11 SURVIVAL MATRIX
+   ========================================================================== */
+
+.defense-section-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+/* Defense Leaderboard Table */
+.defense-leaderboard-table th.th-survived {
+  color: #38bdf8;
+}
+
+/* 7x11 Survival Heatmap Table */
+.survival-heatmap-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-bright);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.survival-heatmap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.survival-heatmap-table th, .survival-heatmap-table td {
+  padding: 0.6rem 0.65rem;
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.survival-heatmap-table th {
+  background: var(--bg-panel-elevated);
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.survival-heatmap-table th.col-header {
+  font-size: 0.7rem;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.survival-heatmap-table th.row-header {
+  text-align: left;
+  font-size: 0.75rem;
+  background: var(--bg-panel-elevated);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.survival-cell {
+  transition: transform 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.survival-cell:hover {
+  transform: scale(1.12);
+  z-index: 10;
+  position: relative;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
+}
+
+/* Heatmap Gradient Tiers */
+.surv-tier-high {
+  background: rgba(16, 185, 129, 0.28);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+.surv-tier-good {
+  background: rgba(6, 182, 212, 0.24);
+  color: #67e8f9;
+}
+.surv-tier-mid {
+  background: rgba(148, 163, 184, 0.14);
+  color: #e2e8f0;
+}
+.surv-tier-vulnerable {
+  background: rgba(245, 158, 11, 0.25);
+  color: #fcd34d;
+}
+.surv-tier-critical {
+  background: rgba(239, 68, 68, 0.32);
+  color: #fca5a5;
+}
+
+/* 7x7 Defense Head-to-Head Table */
+.defense-tournament-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.defense-tournament-table th, .defense-tournament-table td {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.defense-tournament-table th {
+  background: var(--bg-panel-elevated);
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.defense-tournament-table th.row-header {
+  text-align: left;
+  font-size: 0.75rem;
+  background: var(--bg-panel-elevated);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+/* Defense Cards Grid */
+.defense-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+.defense-strategy-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.defense-strategy-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.card-def-random { border-top: 3px solid var(--def-random); }
+.card-def-spaced { border-top: 3px solid var(--def-spaced); }
+.card-def-corner_edge { border-top: 3px solid var(--def-corner-edge); }
+.card-def-clustered { border-top: 3px solid var(--def-clustered); }
+.card-def-anti_midpoint { border-top: 3px solid var(--def-anti-midpoint); }
+.card-def-bait_and_hide { border-top: 3px solid var(--def-bait-and-hide); }
+.card-def-parallel_lanes { border-top: 3px solid var(--def-parallel-lanes); }
+
+.def-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.def-stat-box {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.def-stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-muted);
+}
+
+.def-stat-val {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
 }
 
 /* ==========================================================================

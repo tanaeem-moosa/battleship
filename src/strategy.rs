@@ -13,7 +13,9 @@ use crate::rng::Rng;
 
 /// Defense placement strategy trait.
 pub trait DefenseStrategy {
-    /// Strategy name.
+    /// Strategy identifier (e.g. "random", "spaced", "corner_edge").
+    fn id(&self) -> &'static str;
+    /// Strategy display name.
     fn name(&self) -> &'static str;
     /// Generate a valid 10x10 board with all 5 ships legally placed.
     fn place_ships(&mut self, rng: &mut Rng) -> Board;
@@ -33,7 +35,57 @@ pub trait AttackStrategy {
     fn current_mode(&self) -> &'static str;
 }
 
-/// Standard random defense: places all 5 ships with uniform orientation and coordinates.
+/// Helper function to generate a valid random 5-ship fleet.
+pub fn place_random_fleet(rng: &mut Rng) -> Board {
+    loop {
+        let mut board = Board::new();
+        let mut success = true;
+
+        for &kind in &ShipKind::ALL {
+            let len = kind.length();
+            let mut placed = false;
+
+            for _ in 0..300 {
+                let orient = if rng.next_bool() {
+                    Orientation::Horizontal
+                } else {
+                    Orientation::Vertical
+                };
+
+                let max_r = match orient {
+                    Orientation::Horizontal => HEIGHT,
+                    Orientation::Vertical => HEIGHT + 1 - len,
+                };
+                let max_c = match orient {
+                    Orientation::Horizontal => WIDTH + 1 - len,
+                    Orientation::Vertical => WIDTH,
+                };
+
+                let r = rng.next_usize(max_r);
+                let c = rng.next_usize(max_c);
+                let placement = ShipPlacement::new(kind, r, c, orient);
+
+                if board.can_place(&placement) {
+                    board.place_ship(placement).unwrap();
+                    placed = true;
+                    break;
+                }
+            }
+
+            if !placed {
+                success = false;
+                break;
+            }
+        }
+
+        if success && board.is_valid_fleet() {
+            return board;
+        }
+    }
+}
+
+/// Defense Strategy 1: Uniform Random
+/// - Places all 5 ships with uniform orientation and coordinates across the board.
 #[derive(Clone, Debug, Default)]
 pub struct RandomDefense;
 
@@ -44,27 +96,52 @@ impl RandomDefense {
 }
 
 impl DefenseStrategy for RandomDefense {
+    fn id(&self) -> &'static str {
+        "random"
+    }
+
     fn name(&self) -> &'static str {
-        "Random Placement"
+        "Uniform Random"
     }
 
     fn place_ships(&mut self, rng: &mut Rng) -> Board {
-        loop {
+        place_random_fleet(rng)
+    }
+}
+
+/// Defense Strategy 2: Spaced (No-Touching)
+/// - Places all 5 ships such that no two ships touch orthogonally or diagonally.
+/// - Requires at least a 1-cell water buffer halo around every ship.
+#[derive(Clone, Debug, Default)]
+pub struct SpacedDefense;
+
+impl SpacedDefense {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl DefenseStrategy for SpacedDefense {
+    fn id(&self) -> &'static str {
+        "spaced"
+    }
+
+    fn name(&self) -> &'static str {
+        "Spaced (No-Touching)"
+    }
+
+    fn place_ships(&mut self, rng: &mut Rng) -> Board {
+        // Phase 1: Try full Chebyshev distance >= 2 (no orthogonal or diagonal touch)
+        for _ in 0..200 {
             let mut board = Board::new();
+            let mut occupied_cells = Vec::new();
             let mut success = true;
 
             for &kind in &ShipKind::ALL {
                 let len = kind.length();
-                let mut placed = false;
+                let mut candidates = Vec::new();
 
-                // Try up to 300 random positions per ship
-                for _ in 0..300 {
-                    let orient = if rng.next_bool() {
-                        Orientation::Horizontal
-                    } else {
-                        Orientation::Vertical
-                    };
-
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
                     let max_r = match orient {
                         Orientation::Horizontal => HEIGHT,
                         Orientation::Vertical => HEIGHT + 1 - len,
@@ -74,27 +151,703 @@ impl DefenseStrategy for RandomDefense {
                         Orientation::Vertical => WIDTH,
                     };
 
-                    let r = rng.next_usize(max_r);
-                    let c = rng.next_usize(max_c);
-                    let placement = ShipPlacement::new(kind, r, c, orient);
-
-                    if board.can_place(&placement) {
-                        board.place_ship(placement).unwrap();
-                        placed = true;
-                        break;
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                let mut has_buffer = true;
+                                for cell in placement.cells() {
+                                    for &(or, oc) in &occupied_cells {
+                                        if (cell.0 as isize - or as isize).abs() <= 1
+                                            && (cell.1 as isize - oc as isize).abs() <= 1
+                                        {
+                                            has_buffer = false;
+                                            break;
+                                        }
+                                    }
+                                    if !has_buffer {
+                                        break;
+                                    }
+                                }
+                                if has_buffer {
+                                    candidates.push(placement);
+                                }
+                            }
+                        }
                     }
                 }
 
-                if !placed {
+                if candidates.is_empty() {
                     success = false;
                     break;
                 }
+
+                let chosen = rng.choose(&candidates).unwrap().clone();
+                for cell in chosen.cells() {
+                    occupied_cells.push(cell);
+                }
+                board.place_ship(chosen).unwrap();
             }
 
             if success && board.is_valid_fleet() {
                 return board;
             }
         }
+
+        // Phase 2: Fall back to orthogonal-only buffer
+        for _ in 0..100 {
+            let mut board = Board::new();
+            let mut occupied_cells = Vec::new();
+            let mut success = true;
+
+            for &kind in &ShipKind::ALL {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
+                    let max_r = match orient {
+                        Orientation::Horizontal => HEIGHT,
+                        Orientation::Vertical => HEIGHT + 1 - len,
+                    };
+                    let max_c = match orient {
+                        Orientation::Horizontal => WIDTH + 1 - len,
+                        Orientation::Vertical => WIDTH,
+                    };
+
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                let mut has_buffer = true;
+                                for cell in placement.cells() {
+                                    for &(or, oc) in &occupied_cells {
+                                        if (cell.0 as isize - or as isize).abs()
+                                            + (cell.1 as isize - oc as isize).abs()
+                                            <= 1
+                                        {
+                                            has_buffer = false;
+                                            break;
+                                        }
+                                    }
+                                    if !has_buffer {
+                                        break;
+                                    }
+                                }
+                                if has_buffer {
+                                    candidates.push(placement);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let chosen = rng.choose(&candidates).unwrap().clone();
+                for cell in chosen.cells() {
+                    occupied_cells.push(cell);
+                }
+                board.place_ship(chosen).unwrap();
+            }
+
+            if success && board.is_valid_fleet() {
+                return board;
+            }
+        }
+
+        place_random_fleet(rng)
+    }
+}
+
+/// Defense Strategy 3: Corner & Edge Hugging
+/// - Prioritizes outer border rows/columns (row 0 or 9, col 0 or 9) and touches corner cells.
+/// - Maintains at least 1-cell gaps along perimeter so enemies cannot chain-sink ships.
+#[derive(Clone, Debug, Default)]
+pub struct CornerEdgeDefense;
+
+impl CornerEdgeDefense {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl DefenseStrategy for CornerEdgeDefense {
+    fn id(&self) -> &'static str {
+        "corner_edge"
+    }
+
+    fn name(&self) -> &'static str {
+        "Corner & Edge Hugging"
+    }
+
+    fn place_ships(&mut self, rng: &mut Rng) -> Board {
+        for _ in 0..200 {
+            let mut board = Board::new();
+            let mut success = true;
+
+            for &kind in &ShipKind::ALL {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
+                    let max_r = match orient {
+                        Orientation::Horizontal => HEIGHT,
+                        Orientation::Vertical => HEIGHT + 1 - len,
+                    };
+                    let max_c = match orient {
+                        Orientation::Horizontal => WIDTH + 1 - len,
+                        Orientation::Vertical => WIDTH,
+                    };
+
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                let cells = placement.cells();
+                                let on_outer_border = cells
+                                    .iter()
+                                    .all(|&(cr, cc)| cr == 0 || cr == 9 || cc == 0 || cc == 9);
+                                let on_near_border = cells
+                                    .iter()
+                                    .all(|&(cr, cc)| cr <= 1 || cr >= 8 || cc <= 1 || cc >= 8);
+
+                                let mut has_gap = true;
+                                for &(cr, cc) in &cells {
+                                    for &(dr, dc) in &[(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                                        let nr = cr as isize + dr;
+                                        let nc = cc as isize + dc;
+                                        if nr >= 0 && nr < HEIGHT as isize && nc >= 0 && nc < WIDTH as isize {
+                                            if board.is_occupied(nr as usize, nc as usize) {
+                                                has_gap = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !has_gap {
+                                        break;
+                                    }
+                                }
+
+                                if has_gap {
+                                    let touches_corner = cells.iter().any(|&(cr, cc)| {
+                                        (cr == 0 || cr == 9) && (cc == 0 || cc == 9)
+                                    });
+
+                                    let score = if on_outer_border {
+                                        if touches_corner { 100 } else { 80 }
+                                    } else if on_near_border {
+                                        50
+                                    } else {
+                                        10
+                                    };
+
+                                    candidates.push((placement, score));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let max_score = candidates.iter().map(|(_, s)| *s).max().unwrap();
+                let top_cands: Vec<ShipPlacement> = candidates
+                    .into_iter()
+                    .filter(|(_, s)| *s == max_score)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                let chosen = rng.choose(&top_cands).unwrap().clone();
+                board.place_ship(chosen).unwrap();
+            }
+
+            if success && board.is_valid_fleet() {
+                return board;
+            }
+        }
+
+        place_random_fleet(rng)
+    }
+}
+
+/// Defense Strategy 4: Tightly Clustered Phalanx
+/// - Places ships in a tightly packed cluster by maximizing orthogonal contact with existing ships.
+/// - Leaves 75%+ of the ocean completely barren.
+#[derive(Clone, Debug, Default)]
+pub struct ClusteredDefense;
+
+impl ClusteredDefense {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl DefenseStrategy for ClusteredDefense {
+    fn id(&self) -> &'static str {
+        "clustered"
+    }
+
+    fn name(&self) -> &'static str {
+        "Tightly Clustered Phalanx"
+    }
+
+    fn place_ships(&mut self, rng: &mut Rng) -> Board {
+        for _ in 0..200 {
+            let mut board = Board::new();
+            let mut success = true;
+
+            for (i, &kind) in ShipKind::ALL.iter().enumerate() {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
+                    let max_r = match orient {
+                        Orientation::Horizontal => HEIGHT,
+                        Orientation::Vertical => HEIGHT + 1 - len,
+                    };
+                    let max_c = match orient {
+                        Orientation::Horizontal => WIDTH + 1 - len,
+                        Orientation::Vertical => WIDTH,
+                    };
+
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                if i == 0 {
+                                    candidates.push((placement, 1));
+                                } else {
+                                    let mut contact = 0usize;
+                                    for &(cr, cc) in &placement.cells() {
+                                        for &(dr, dc) in &[(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                                            let nr = cr as isize + dr;
+                                            let nc = cc as isize + dc;
+                                            if nr >= 0 && nr < HEIGHT as isize && nc >= 0 && nc < WIDTH as isize {
+                                                if board.is_occupied(nr as usize, nc as usize) {
+                                                    contact += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    candidates.push((placement, contact));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let max_score = candidates.iter().map(|(_, s)| *s).max().unwrap();
+                let top_cands: Vec<ShipPlacement> = candidates
+                    .into_iter()
+                    .filter(|(_, s)| *s == max_score)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                let chosen = rng.choose(&top_cands).unwrap().clone();
+                board.place_ship(chosen).unwrap();
+            }
+
+            if success && board.is_valid_fleet() {
+                return board;
+            }
+        }
+
+        place_random_fleet(rng)
+    }
+}
+
+/// Defense Strategy 5: Anti-Midpoint (Bisection Dodger)
+/// - Specifically dodges Largest Empty Rectangle midpoints and bisection lines.
+/// - Penalizes primary bisections (rows/cols 4, 5) and secondary bisections (rows/cols 2, 7).
+#[derive(Clone, Debug, Default)]
+pub struct AntiMidpointDefense;
+
+impl AntiMidpointDefense {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl DefenseStrategy for AntiMidpointDefense {
+    fn id(&self) -> &'static str {
+        "anti_midpoint"
+    }
+
+    fn name(&self) -> &'static str {
+        "Anti-Midpoint (Bisection Dodger)"
+    }
+
+    fn place_ships(&mut self, rng: &mut Rng) -> Board {
+        for _ in 0..200 {
+            let mut board = Board::new();
+            let mut success = true;
+
+            for &kind in &ShipKind::ALL {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
+                    let max_r = match orient {
+                        Orientation::Horizontal => HEIGHT,
+                        Orientation::Vertical => HEIGHT + 1 - len,
+                    };
+                    let max_c = match orient {
+                        Orientation::Horizontal => WIDTH + 1 - len,
+                        Orientation::Vertical => WIDTH,
+                    };
+
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                let mut cost = 0usize;
+                                for &(cr, cc) in &placement.cells() {
+                                    if cr == 4 || cr == 5 {
+                                        cost += 10;
+                                    }
+                                    if cc == 4 || cc == 5 {
+                                        cost += 10;
+                                    }
+                                    if cr == 2 || cr == 7 {
+                                        cost += 4;
+                                    }
+                                    if cc == 2 || cc == 7 {
+                                        cost += 4;
+                                    }
+                                    for &(dr, dc) in &[(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                                        let nr = cr as isize + dr;
+                                        let nc = cc as isize + dc;
+                                        if nr >= 0 && nr < HEIGHT as isize && nc >= 0 && nc < WIDTH as isize {
+                                            if board.is_occupied(nr as usize, nc as usize) {
+                                                cost += 2;
+                                            }
+                                        }
+                                    }
+                                }
+                                candidates.push((placement, cost));
+                            }
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let min_cost = candidates.iter().map(|(_, c)| *c).min().unwrap();
+                let best_cands: Vec<ShipPlacement> = candidates
+                    .into_iter()
+                    .filter(|(_, c)| *c == min_cost)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                let chosen = rng.choose(&best_cands).unwrap().clone();
+                board.place_ship(chosen).unwrap();
+            }
+
+            if success && board.is_valid_fleet() {
+                return board;
+            }
+        }
+
+        place_random_fleet(rng)
+    }
+}
+
+/// Defense Strategy 6: Bait Capital + Corner Destroyer
+/// - Places small endgame ships (Destroyer, Submarine) in extreme corners.
+/// - Places capital ships (Carrier, Battleship, Cruiser) in the interior (rows/cols 2..=7)
+///   with a Manhattan buffer >= 2 from small ships, preventing target-mode splash damage.
+#[derive(Clone, Debug, Default)]
+pub struct BaitAndHideDefense;
+
+impl BaitAndHideDefense {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl DefenseStrategy for BaitAndHideDefense {
+    fn id(&self) -> &'static str {
+        "bait_and_hide"
+    }
+
+    fn name(&self) -> &'static str {
+        "Bait Capital + Corner Destroyer"
+    }
+
+    fn place_ships(&mut self, rng: &mut Rng) -> Board {
+        let corners = [(0, 0), (0, 9), (9, 0), (9, 9)];
+
+        for _ in 0..200 {
+            let mut board = Board::new();
+            let mut small_ship_cells = Vec::new();
+            let mut success = true;
+
+            // Step 1: Place small endgame ships (Destroyer, Submarine) first on corners/outer edges
+            for &kind in &[ShipKind::Destroyer, ShipKind::Submarine] {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
+                    let max_r = match orient {
+                        Orientation::Horizontal => HEIGHT,
+                        Orientation::Vertical => HEIGHT + 1 - len,
+                    };
+                    let max_c = match orient {
+                        Orientation::Horizontal => WIDTH + 1 - len,
+                        Orientation::Vertical => WIDTH,
+                    };
+
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                let cells = placement.cells();
+                                let on_outer = cells
+                                    .iter()
+                                    .all(|&(cr, cc)| cr == 0 || cr == 9 || cc == 0 || cc == 9);
+                                if on_outer {
+                                    let min_corner_dist = cells
+                                        .iter()
+                                        .map(|&(cr, cc)| {
+                                            corners
+                                                .iter()
+                                                .map(|&(cor_r, cor_c)| {
+                                                    (cr as isize - cor_r as isize).abs()
+                                                        + (cc as isize - cor_c as isize).abs()
+                                                })
+                                                .min()
+                                                .unwrap()
+                                        })
+                                        .min()
+                                        .unwrap();
+
+                                    let mut has_gap = true;
+                                    for &(cr, cc) in &cells {
+                                        for &(sr, sc) in &small_ship_cells {
+                                            if (cr as isize - sr as isize).abs() <= 1
+                                                && (cc as isize - sc as isize).abs() <= 1
+                                            {
+                                                has_gap = false;
+                                                break;
+                                            }
+                                        }
+                                        if !has_gap {
+                                            break;
+                                        }
+                                    }
+
+                                    if has_gap {
+                                        candidates.push((placement, min_corner_dist));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let min_dist = candidates.iter().map(|(_, d)| *d).min().unwrap();
+                let best: Vec<ShipPlacement> = candidates
+                    .into_iter()
+                    .filter(|(_, d)| *d == min_dist)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                let chosen = rng.choose(&best).unwrap().clone();
+                for cell in chosen.cells() {
+                    small_ship_cells.push(cell);
+                }
+                board.place_ship(chosen).unwrap();
+            }
+
+            if !success {
+                continue;
+            }
+
+            // Step 2: Place capital ships (Carrier, Battleship, Cruiser) in interior (2..=7)
+            for &kind in &[ShipKind::Carrier, ShipKind::Battleship, ShipKind::Cruiser] {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                for &orient in &[Orientation::Horizontal, Orientation::Vertical] {
+                    let max_r = match orient {
+                        Orientation::Horizontal => HEIGHT,
+                        Orientation::Vertical => HEIGHT + 1 - len,
+                    };
+                    let max_c = match orient {
+                        Orientation::Horizontal => WIDTH + 1 - len,
+                        Orientation::Vertical => WIDTH,
+                    };
+
+                    for r in 0..max_r {
+                        for c in 0..max_c {
+                            let placement = ShipPlacement::new(kind, r, c, orient);
+                            if board.can_place(&placement) {
+                                let cells = placement.cells();
+                                let interior_count = cells
+                                    .iter()
+                                    .filter(|&&(cr, cc)| cr >= 2 && cr <= 7 && cc >= 2 && cc <= 7)
+                                    .count();
+
+                                let mut safe_from_splash = true;
+                                for &(cr, cc) in &cells {
+                                    for &(sr, sc) in &small_ship_cells {
+                                        if (cr as isize - sr as isize).abs()
+                                            + (cc as isize - sc as isize).abs()
+                                            < 2
+                                        {
+                                            safe_from_splash = false;
+                                            break;
+                                        }
+                                    }
+                                    if !safe_from_splash {
+                                        break;
+                                    }
+                                }
+
+                                if safe_from_splash {
+                                    candidates.push((placement, interior_count));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let max_interior = candidates.iter().map(|(_, c)| *c).max().unwrap();
+                let best: Vec<ShipPlacement> = candidates
+                    .into_iter()
+                    .filter(|(_, c)| *c == max_interior)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                let chosen = rng.choose(&best).unwrap().clone();
+                board.place_ship(chosen).unwrap();
+            }
+
+            if success && board.is_valid_fleet() {
+                return board;
+            }
+        }
+
+        place_random_fleet(rng)
+    }
+}
+
+/// Defense Strategy 7: Parallel Lanes (Single Axis)
+/// - Picks a single orientation (Horizontal or Vertical) for the entire fleet.
+/// - Places all 5 ships in that orientation, preferring non-touching parallel lanes.
+#[derive(Clone, Debug, Default)]
+pub struct ParallelLanesDefense;
+
+impl ParallelLanesDefense {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl DefenseStrategy for ParallelLanesDefense {
+    fn id(&self) -> &'static str {
+        "parallel_lanes"
+    }
+
+    fn name(&self) -> &'static str {
+        "Parallel Lanes (Single Axis)"
+    }
+
+    fn place_ships(&mut self, rng: &mut Rng) -> Board {
+        let single_orient = if rng.next_bool() {
+            Orientation::Horizontal
+        } else {
+            Orientation::Vertical
+        };
+
+        for _ in 0..200 {
+            let mut board = Board::new();
+            let mut success = true;
+
+            for &kind in &ShipKind::ALL {
+                let len = kind.length();
+                let mut candidates = Vec::new();
+
+                let max_r = match single_orient {
+                    Orientation::Horizontal => HEIGHT,
+                    Orientation::Vertical => HEIGHT + 1 - len,
+                };
+                let max_c = match single_orient {
+                    Orientation::Horizontal => WIDTH + 1 - len,
+                    Orientation::Vertical => WIDTH,
+                };
+
+                for r in 0..max_r {
+                    for c in 0..max_c {
+                        let placement = ShipPlacement::new(kind, r, c, single_orient);
+                        if board.can_place(&placement) {
+                            let mut touches = false;
+                            for &(cr, cc) in &placement.cells() {
+                                for &(dr, dc) in &[(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                                    let nr = cr as isize + dr;
+                                    let nc = cc as isize + dc;
+                                    if nr >= 0 && nr < HEIGHT as isize && nc >= 0 && nc < WIDTH as isize {
+                                        if board.is_occupied(nr as usize, nc as usize) {
+                                            touches = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if touches {
+                                    break;
+                                }
+                            }
+                            candidates.push((placement, if touches { 0 } else { 1 }));
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    success = false;
+                    break;
+                }
+
+                let max_score = candidates.iter().map(|(_, s)| *s).max().unwrap();
+                let best: Vec<ShipPlacement> = candidates
+                    .into_iter()
+                    .filter(|(_, s)| *s == max_score)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                let chosen = rng.choose(&best).unwrap().clone();
+                board.place_ship(chosen).unwrap();
+            }
+
+            if success && board.is_valid_fleet() {
+                return board;
+            }
+        }
+
+        place_random_fleet(rng)
     }
 }
 
@@ -2103,5 +2856,53 @@ mod tests {
         assert!(density[4][3] >= 1_000_000, "Expected collinear (4,3) to have >= 1M density, got {}", density[4][3]);
         assert!(density[4][6] >= 1_000_000, "Expected collinear (4,6) to have >= 1M density, got {}", density[4][6]);
         assert!(density[4][3] > density[3][4] * 100, "Collinear must dominate orthogonal probe");
+    }
+
+    #[test]
+    fn test_all_seven_defenses_valid_fleets() {
+        let mut rng = Rng::with_seed(12345);
+        let mut defenses: Vec<Box<dyn DefenseStrategy>> = vec![
+            Box::new(RandomDefense::new()),
+            Box::new(SpacedDefense::new()),
+            Box::new(CornerEdgeDefense::new()),
+            Box::new(ClusteredDefense::new()),
+            Box::new(AntiMidpointDefense::new()),
+            Box::new(BaitAndHideDefense::new()),
+            Box::new(ParallelLanesDefense::new()),
+        ];
+
+        for def in defenses.iter_mut() {
+            assert!(!def.id().is_empty());
+            assert!(!def.name().is_empty());
+            for _ in 0..10 {
+                let board = def.place_ships(&mut rng);
+                assert!(board.is_valid_fleet(), "Defense {} produced invalid fleet", def.id());
+                assert_eq!(board.placements().len(), 5);
+            }
+        }
+    }
+
+    #[test]
+    fn test_spaced_defense_spacing() {
+        let mut rng = Rng::with_seed(54321);
+        let mut def = SpacedDefense::new();
+        for _ in 0..10 {
+            let board = def.place_ships(&mut rng);
+            assert!(board.is_valid_fleet());
+        }
+    }
+
+    #[test]
+    fn test_parallel_lanes_defense_same_orientation() {
+        let mut rng = Rng::with_seed(777);
+        let mut def = ParallelLanesDefense::new();
+        for _ in 0..10 {
+            let board = def.place_ships(&mut rng);
+            assert!(board.is_valid_fleet());
+            let first_orient = board.placements()[0].orientation;
+            for p in board.placements() {
+                assert_eq!(p.orientation, first_orient, "All ships in ParallelLanes must share orientation");
+            }
+        }
     }
 }

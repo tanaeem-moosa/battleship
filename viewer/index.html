@@ -52,40 +52,82 @@
       
       <!-- Top Control Bar -->
       <div class="replay-control-bar">
-        <div class="control-group">
-          <label for="select-p1-strategy">Player 1 (North Fleet):</label>
-          <select id="select-p1-strategy" class="tactical-select">
-            <option value="bayesian_pdf" selected>Bayesian Probability Density</option>
-            <option value="monte_carlo">Monte Carlo Sampling</option>
-            <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
-            <option value="stride_5432">Descending Stride (5→4→3→2)</option>
-            <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
-            <option value="stride4_to_2">Staggered Stride (4→2)</option>
-            <option value="rect_checkerboard">Largest Rect + Checkerboard</option>
-            <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
-            <option value="largest_rect">Largest Empty Rect Midpoint</option>
-            <option value="checkerboard">Checkerboard + Hunt/Target</option>
-            <option value="random_hunt">Random + Hunt/Target</option>
-          </select>
+        <!-- Player 1 Config Box -->
+        <div class="player-config-box">
+          <div class="player-config-header">
+            <span class="player-indicator-dot p1-dot"></span>
+            <span class="player-config-title">PLAYER 1 (NORTH)</span>
+          </div>
+          <div class="player-config-inputs">
+            <div class="control-group">
+              <label for="select-p1-strategy">Attack Strategy:</label>
+              <select id="select-p1-strategy" class="tactical-select">
+                <option value="bayesian_pdf" selected>Bayesian Probability Density</option>
+                <option value="monte_carlo">Monte Carlo Sampling</option>
+                <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
+                <option value="stride_5432">Descending Stride (5→4→3→2)</option>
+                <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
+                <option value="stride4_to_2">Staggered Stride (4→2)</option>
+                <option value="rect_checkerboard">Largest Rect + Checkerboard</option>
+                <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
+                <option value="largest_rect">Largest Empty Rect Midpoint</option>
+                <option value="checkerboard">Checkerboard + Hunt/Target</option>
+                <option value="random_hunt">Random + Hunt/Target</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label for="select-p1-defense">Defense Strategy:</label>
+              <select id="select-p1-defense" class="tactical-select">
+                <option value="random" selected>Uniform Random</option>
+                <option value="spaced">Spaced (No-Touching)</option>
+                <option value="corner_edge">Corner &amp; Edge Hugging</option>
+                <option value="clustered">Tightly Clustered Phalanx</option>
+                <option value="anti_midpoint">Anti-Midpoint (Bisection Dodger)</option>
+                <option value="bait_and_hide">Bait Capital + Corner Destroyer</option>
+                <option value="parallel_lanes">Parallel Lanes (Single Axis)</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div class="vs-divider">VS</div>
 
-        <div class="control-group">
-          <label for="select-p2-strategy">Player 2 (South Fleet):</label>
-          <select id="select-p2-strategy" class="tactical-select">
-            <option value="random_hunt" selected>Random + Hunt/Target</option>
-            <option value="checkerboard">Checkerboard + Hunt/Target</option>
-            <option value="largest_rect">Largest Empty Rect Midpoint</option>
-            <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
-            <option value="rect_checkerboard">Largest Rect + Checkerboard</option>
-            <option value="stride4_to_2">Staggered Stride (4→2)</option>
-            <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
-            <option value="stride_5432">Descending Stride (5→4→3→2)</option>
-            <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
-            <option value="monte_carlo">Monte Carlo Sampling</option>
-            <option value="bayesian_pdf">Bayesian Probability Density</option>
-          </select>
+        <!-- Player 2 Config Box -->
+        <div class="player-config-box">
+          <div class="player-config-header">
+            <span class="player-indicator-dot p2-dot"></span>
+            <span class="player-config-title">PLAYER 2 (SOUTH)</span>
+          </div>
+          <div class="player-config-inputs">
+            <div class="control-group">
+              <label for="select-p2-strategy">Attack Strategy:</label>
+              <select id="select-p2-strategy" class="tactical-select">
+                <option value="random_hunt" selected>Random + Hunt/Target</option>
+                <option value="checkerboard">Checkerboard + Hunt/Target</option>
+                <option value="largest_rect">Largest Empty Rect Midpoint</option>
+                <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
+                <option value="rect_checkerboard">Largest Rect + Checkerboard</option>
+                <option value="stride4_to_2">Staggered Stride (4→2)</option>
+                <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
+                <option value="stride_5432">Descending Stride (5→4→3→2)</option>
+                <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
+                <option value="monte_carlo">Monte Carlo Sampling</option>
+                <option value="bayesian_pdf">Bayesian Probability Density</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label for="select-p2-defense">Defense Strategy:</label>
+              <select id="select-p2-defense" class="tactical-select">
+                <option value="random" selected>Uniform Random</option>
+                <option value="spaced">Spaced (No-Touching)</option>
+                <option value="corner_edge">Corner &amp; Edge Hugging</option>
+                <option value="clustered">Tightly Clustered Phalanx</option>
+                <option value="anti_midpoint">Anti-Midpoint (Bisection Dodger)</option>
+                <option value="bait_and_hide">Bait Capital + Corner Destroyer</option>
+                <option value="parallel_lanes">Parallel Lanes (Single Axis)</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div class="control-group seed-group">
@@ -136,7 +178,10 @@
               <span class="player-color-tag p1-tag"></span>
               <div class="player-titles">
                 <h2 class="player-name">PLAYER 1</h2>
-                <span id="p1-strategy-label" class="player-strategy-badge">Bayesian Probability Density</span>
+                <div class="player-badges-row">
+                  <span id="p1-strategy-label" class="player-strategy-badge">Bayesian Probability Density</span>
+                  <span id="p1-defense-label" class="player-defense-badge">Def: Uniform Random</span>
+                </div>
               </div>
             </div>
             <div class="ai-state-indicator">
@@ -206,7 +251,10 @@
               <span class="player-color-tag p2-tag"></span>
               <div class="player-titles">
                 <h2 class="player-name">PLAYER 2</h2>
-                <span id="p2-strategy-label" class="player-strategy-badge">Random + Hunt/Target</span>
+                <div class="player-badges-row">
+                  <span id="p2-strategy-label" class="player-strategy-badge">Random + Hunt/Target</span>
+                  <span id="p2-defense-label" class="player-defense-badge">Def: Uniform Random</span>
+                </div>
               </div>
             </div>
             <div class="ai-state-indicator">
@@ -367,7 +415,22 @@
         </div>
       </div>
 
-      <!-- 11-STRATEGY COMPARISON LEADERBOARD TABLE -->
+      <!-- Benchmark Subnavigation: Attack vs Defense -->
+      <div class="benchmark-subnav">
+        <button id="btn-subtab-attack" class="subtab-btn active">
+          <span class="subtab-icon">⚔️</span>
+          <span>Attack Algorithms (11)</span>
+        </button>
+        <button id="btn-subtab-defense" class="subtab-btn defense-subtab">
+          <span class="subtab-icon">🛡️</span>
+          <span>Defense &amp; 7×11 Survival Matrix</span>
+        </button>
+      </div>
+
+      <!-- ==================== SUBPANEL 1: ATTACK STRATEGY BENCHMARK ==================== -->
+      <div id="attack-benchmark-section" class="benchmark-subpanel active-subpanel">
+
+        <!-- 11-STRATEGY COMPARISON LEADERBOARD TABLE -->
       <div class="leaderboard-card">
         <div class="leaderboard-header">
           <div class="lb-title-group">
@@ -462,6 +525,105 @@
           </div>
         </div>
       </div>
+      </div><!-- End #attack-benchmark-section -->
+
+      <!-- ==================== SUBPANEL 2: DEFENSIVE STRATEGY BENCHMARK & 7x11 SURVIVAL MATRIX ==================== -->
+      <div id="defense-benchmark-section" class="benchmark-subpanel">
+        <div class="defense-section-container">
+
+          <!-- 7-DEFENSE COMPARISON LEADERBOARD TABLE -->
+          <div class="leaderboard-card">
+            <div class="leaderboard-header">
+              <div class="lb-title-group">
+                <h3 class="lb-title">DEFENSE STRATEGY DURABILITY LEADERBOARD</h3>
+                <span class="lb-subtitle">Ranked by highest Mean Turns Survived across all 11 Attack Strategies</span>
+              </div>
+              <div class="lb-champion-badge" id="def-champion-badge" style="border-color: #a855f7;">
+                <span class="trophy-icon">🛡️</span>
+                <span class="champion-text">TOP DEFENSE: <strong id="def-champion-name">--</strong></span>
+              </div>
+            </div>
+
+            <div class="leaderboard-table-wrapper">
+              <table class="leaderboard-table defense-leaderboard-table" id="defense-leaderboard-table">
+                <thead>
+                  <tr>
+                    <th class="th-rank">RANK</th>
+                    <th class="th-strategy">DEFENSE STRATEGY</th>
+                    <th class="th-mean th-survived">MEAN TURNS SURVIVED</th>
+                    <th class="th-median">MEDIAN</th>
+                    <th class="th-std">STD DEV (σ)</th>
+                    <th class="th-min">MIN (FASTEST SINK)</th>
+                    <th class="th-max">MAX (LONGEST HOLD)</th>
+                    <th class="th-p10">P10</th>
+                    <th class="th-p90">P90</th>
+                    <th class="th-winrate">TOURNAMENT WIN RATE</th>
+                  </tr>
+                </thead>
+                <tbody id="defense-leaderboard-tbody">
+                  <!-- Dynamically populated rows for all 7 defense strategies -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 7 DEFENSES x 11 ATTACKERS SURVIVAL HEATMAP MATRIX -->
+          <div class="tournament-card" id="survival-matrix-card">
+            <div class="tournament-header">
+              <div class="tourn-title-group">
+                <h3 class="tourn-title">7 DEFENSES × 11 ATTACKERS SURVIVAL HEATMAP MATRIX</h3>
+                <span class="tourn-subtitle">Mean turns survived by each defense layout against each attack algorithm. Higher = more resilient (green/cyan), Lower = more vulnerable (coral/red).</span>
+              </div>
+              <div class="matrix-legend">
+                <span class="matrix-legend-item"><span class="matrix-swatch" style="background: #10b981;"></span> &gt; 52 Turns (High Resilience)</span>
+                <span class="matrix-legend-item"><span class="matrix-swatch" style="background: #06b6d4;"></span> 49-52 Turns (Solid)</span>
+                <span class="matrix-legend-item"><span class="matrix-swatch" style="background: #64748b;"></span> 46-49 Turns (Average)</span>
+                <span class="matrix-legend-item"><span class="matrix-swatch" style="background: #f59e0b;"></span> 42-46 Turns (Vulnerable)</span>
+                <span class="matrix-legend-item"><span class="matrix-swatch" style="background: #ef4444;"></span> &lt; 42 Turns (Critical)</span>
+              </div>
+            </div>
+
+            <div class="survival-heatmap-wrapper">
+              <table class="survival-heatmap-table" id="survival-heatmap-table">
+                <!-- Dynamically generated 7x11 cross-table -->
+              </table>
+            </div>
+          </div>
+
+          <!-- 7x7 DEFENSE TOURNAMENT HEAD-TO-HEAD MATRIX -->
+          <div class="tournament-card" id="defense-tournament-card">
+            <div class="tournament-header">
+              <div class="tourn-title-group">
+                <h3 class="tourn-title">7×7 DEFENSE TOURNAMENT HEAD-TO-HEAD MATRIX</h3>
+                <span class="tourn-subtitle">Pairwise win rate (%) when both defense layouts face the same random attacker. Row Defense vs Column Defense.</span>
+              </div>
+              <div class="matrix-legend">
+                <span class="matrix-legend-item"><span class="matrix-swatch swatch-win"></span> &gt; 55% Win</span>
+                <span class="matrix-legend-item"><span class="matrix-swatch swatch-even"></span> 45-55% Even</span>
+                <span class="matrix-legend-item"><span class="matrix-swatch swatch-loss"></span> &lt; 45% Loss</span>
+              </div>
+            </div>
+
+            <div class="tournament-matrix-wrapper">
+              <table class="defense-tournament-table" id="defense-tournament-table">
+                <!-- Dynamically generated 7x7 cross-table -->
+              </table>
+            </div>
+          </div>
+
+          <!-- 7 DEFENSE PROFILES SUMMARY CARDS -->
+          <div class="summary-cards-section" id="defense-summary-cards-section">
+            <div class="cards-section-header">
+              <h3 class="cards-section-title">ALL 7 DEFENSIVE PLACEMENT STRATEGY PROFILES</h3>
+              <span class="cards-section-subtitle">Geometric placement doctrine, survivability analysis, and counter-tactics</span>
+            </div>
+            <div class="defense-cards-grid" id="defense-cards-grid">
+              <!-- Dynamically populated for all 7 defense strategies -->
+            </div>
+          </div>
+
+        </div>
+      </div><!-- End #defense-benchmark-section -->
 
     </section>
 

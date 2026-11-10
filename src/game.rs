@@ -316,6 +316,11 @@ impl Board {
         }
     }
 
+    /// Check if cell (row, col) is occupied by any ship.
+    pub fn is_occupied(&self, row: usize, col: usize) -> bool {
+        self.ship_at(row, col).is_some()
+    }
+
     /// Check if a cell has already received a shot.
     pub fn is_shot(&self, row: usize, col: usize) -> bool {
         if row < HEIGHT && col < WIDTH {

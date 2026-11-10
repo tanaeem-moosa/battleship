@@ -8,11 +8,10 @@
 use std::fs;
 use std::path::Path;
 
-use battleship::server::{create_strategy, run_server};
+use battleship::server::{create_defense, create_strategy, run_server};
 use battleship::sim::{
     print_benchmark_summary, run_benchmark, simulate_match, BenchmarkReport, MatchReplay,
 };
-use battleship::strategy::RandomDefense;
 
 fn print_help() {
     println!(
@@ -23,18 +22,21 @@ USAGE:
 
 SUBCOMMANDS:
     simulate (default)  Run multi-game statistical benchmark of all 11 attack strategies
-                        and complete 11x11 round-robin head-to-head tournament.
-                        Prints summary table, tournament standings, 11x11 matrix &
-                        ASCII histogram to stdout, and writes `viewer/sample_data.js`.
+                        and all 7 defense strategies.
+                        Executes:
+                          - 11 Attack Strategies Solo Benchmark & 11x11 Round-Robin Tournament
+                          - 7 Defenses x 11 Attackers Survival Matrix (Mean Turns Survived)
+                          - 7x7 Defense Head-to-Head Tournament & Overall Defense Standings
+                        Prints summary tables & ASCII histograms to stdout, and writes `viewer/sample_data.js`.
                         Options:
                           --games <N>    Number of games per strategy (default: 1000)
                           --seed <S>     PRNG seed for reproducible results (default: 42)
 
     match               Simulate a single head-to-head match and print JSON to stdout.
                         Options:
-                          --p1 <STRAT>   Player 1 strategy (default: random_hunt)
-                          --p2 <STRAT>   Player 2 strategy (default: checkerboard)
-                                         Available:
+                          --p1 <STRAT>   Player 1 attack strategy (default: random_hunt)
+                          --p2 <STRAT>   Player 2 attack strategy (default: checkerboard)
+                                         Attack Strategies:
                                            - random_hunt       ("Random + Hunt/Target")
                                            - checkerboard      ("Checkerboard + Hunt/Target")
                                            - largest_rect      ("Largest Empty Rect Midpoint")
@@ -46,6 +48,18 @@ SUBCOMMANDS:
                                            - rect_checkerboard ("Largest Rect + Checkerboard")
                                            - monte_carlo       ("Monte Carlo Sampling")
                                            - bayesian_pdf      ("Bayesian Probability Density")
+
+                          --d1 <DEF>     Player 1 defense strategy (default: random)
+                          --d2 <DEF>     Player 2 defense strategy (default: random)
+                                         Defense Strategies:
+                                           - random          ("Uniform Random")
+                                           - spaced          ("Spaced (No-Touching)")
+                                           - corner_edge     ("Corner & Edge Hugging")
+                                           - clustered       ("Tightly Clustered Phalanx")
+                                           - anti_midpoint   ("Anti-Midpoint (Bisection Dodger)")
+                                           - bait_and_hide   ("Bait Capital + Corner Destroyer")
+                                           - parallel_lanes  ("Parallel Lanes (Single Axis)")
+
                           --seed <S>     PRNG seed (default: 42)
 
     serve               Start local HTTP server serving web viewer and REST APIs.
@@ -56,7 +70,7 @@ SUBCOMMANDS:
 
 EXAMPLES:
     cargo run -- simulate --games 1000 --seed 42
-    cargo run -- match --p1 bayesian_pdf --p2 monte_carlo --seed 123
+    cargo run -- match --p1 bayesian_pdf --p2 monte_carlo --d1 spaced --d2 anti_midpoint --seed 123
     cargo run -- serve --port 8080
 "#
     );
@@ -116,31 +130,31 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let report = run_benchmark(games, seed);
     print_benchmark_summary(&report);
 
-    // Pre-generate diverse sample matches showcasing all strategies for the browser viewer:
+    // Pre-generate diverse sample matches showcasing all strategies and defenses for the browser viewer:
     let sample_configs = [
-        ("Bayesian Probability Density", "bayesian_pdf", "Monte Carlo Sampling", "monte_carlo", seed + 505),
-        ("Bayesian Probability Density", "bayesian_pdf", "Largest Rect + Stride (4->2)", "rect_stride4", seed + 101),
-        ("Monte Carlo Sampling", "monte_carlo", "Largest Rect + Stride (5->4->3->2)", "rect_stride_5432", seed + 606),
-        ("Descending Stride (5->4->3->2)", "stride_5432", "Largest Rect + Checkerboard", "rect_checkerboard", seed + 707),
-        ("Largest Rect + Stride (4->2)", "rect_stride4", "Staggered Stride (4->2)", "stride4_to_2", seed + 777),
-        ("Staggered Stride (4->2)", "stride4_to_2", "Adaptive Stride (2->3->4->5)", "adaptive_stride", seed + 202),
-        ("Largest Empty Rect Midpoint", "largest_rect", "Checkerboard + Hunt/Target", "checkerboard", seed + 303),
-        ("Checkerboard + Hunt/Target", "checkerboard", "Random + Hunt/Target", "random_hunt", seed),
+        ("Bayesian Probability Density", "bayesian_pdf", "spaced", "Monte Carlo Sampling", "monte_carlo", "anti_midpoint", seed + 505),
+        ("Bayesian Probability Density", "bayesian_pdf", "corner_edge", "Largest Rect + Stride (4->2)", "rect_stride4", "clustered", seed + 101),
+        ("Monte Carlo Sampling", "monte_carlo", "bait_and_hide", "Largest Rect + Stride (5->4->3->2)", "rect_stride_5432", "spaced", seed + 606),
+        ("Descending Stride (5->4->3->2)", "stride_5432", "parallel_lanes", "Largest Rect + Checkerboard", "rect_checkerboard", "corner_edge", seed + 707),
+        ("Largest Rect + Stride (4->2)", "rect_stride4", "anti_midpoint", "Staggered Stride (4->2)", "stride4_to_2", "bait_and_hide", seed + 777),
+        ("Staggered Stride (4->2)", "stride4_to_2", "clustered", "Adaptive Stride (2->3->4->5)", "adaptive_stride", "parallel_lanes", seed + 202),
+        ("Largest Empty Rect Midpoint", "largest_rect", "spaced", "Checkerboard + Hunt/Target", "checkerboard", "corner_edge", seed + 303),
+        ("Checkerboard + Hunt/Target", "checkerboard", "random", "Random + Hunt/Target", "random_hunt", "random", seed),
     ];
 
     let mut sample_matches = Vec::new();
-    for (name1, id1, name2, id2, s) in sample_configs {
+    for (name1, id1, d1_id, name2, id2, d2_id, s) in sample_configs {
         let (mut p1_att, _) = create_strategy(id1);
         let (mut p2_att, _) = create_strategy(id2);
-        let mut def1 = RandomDefense::new();
-        let mut def2 = RandomDefense::new();
+        let (mut def1, _) = create_defense(d1_id);
+        let (mut def2, _) = create_defense(d2_id);
         let replay = simulate_match(
             name1,
             p1_att.as_mut(),
-            &mut def1,
+            def1.as_mut(),
             name2,
             p2_att.as_mut(),
-            &mut def2,
+            def2.as_mut(),
             s,
         );
         sample_matches.push(replay);
@@ -156,6 +170,8 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 fn run_match_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut p1_id = "random_hunt".to_string();
     let mut p2_id = "checkerboard".to_string();
+    let mut d1_id = "random".to_string();
+    let mut d2_id = "random".to_string();
     let mut seed: u64 = 42;
 
     let mut i = 0;
@@ -173,6 +189,18 @@ fn run_match_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     i += 1;
                 }
             }
+            "--d1" => {
+                if i + 1 < args.len() {
+                    d1_id = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            "--d2" => {
+                if i + 1 < args.len() {
+                    d2_id = args[i + 1].clone();
+                    i += 1;
+                }
+            }
             "--seed" | "-s" => {
                 if i + 1 < args.len() {
                     seed = args[i + 1].parse().unwrap_or(42);
@@ -186,16 +214,16 @@ fn run_match_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     let (mut p1_att, p1_name) = create_strategy(&p1_id);
     let (mut p2_att, p2_name) = create_strategy(&p2_id);
-    let mut def1 = RandomDefense::new();
-    let mut def2 = RandomDefense::new();
+    let (mut def1, _) = create_defense(&d1_id);
+    let (mut def2, _) = create_defense(&d2_id);
 
     let replay = simulate_match(
         p1_name,
         p1_att.as_mut(),
-        &mut def1,
+        def1.as_mut(),
         p2_name,
         p2_att.as_mut(),
-        &mut def2,
+        def2.as_mut(),
         seed,
     );
 
