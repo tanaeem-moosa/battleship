@@ -29,13 +29,18 @@
   --water-blue: #0b1726;
   --water-grid: #132337;
 
-  /* 6 Strategy Distinct Colors */
+  /* 11 Strategy Distinct Colors */
   --color-random: #f97316;
   --color-checkerboard: #38bdf8;
   --color-largest-rect: #10b981;
   --color-adaptive-stride: #a855f7;
   --color-stride4-to-2: #ec4899;
   --color-rect-stride4: #f59e0b;
+  --color-stride-5432: #06b6d4;
+  --color-rect-stride-5432: #84cc16;
+  --color-rect-checkerboard: #6366f1;
+  --color-monte-carlo: #e11d48;
+  --color-bayesian-pdf: #eab308;
 
   /* Ship Colors */
   --ship-carrier: #0ea5e9;
@@ -1334,11 +1339,11 @@ body.command-center-theme {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid #f59e0b;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid #eab308;
   padding: 0.35rem 0.8rem;
   border-radius: 6px;
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.25);
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.25);
 }
 
 .trophy-icon {
@@ -1348,7 +1353,7 @@ body.command-center-theme {
 .champion-text {
   font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: #fbbf24;
+  color: #fde047;
 }
 
 .leaderboard-table-wrapper {
@@ -1389,7 +1394,7 @@ body.command-center-theme {
 }
 
 .leaderboard-table tr.champion-row {
-  background: rgba(245, 158, 11, 0.08);
+  background: rgba(234, 179, 8, 0.08);
 }
 
 .rank-badge {
@@ -1406,10 +1411,10 @@ body.command-center-theme {
 }
 
 .rank-badge.rank-1 {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: linear-gradient(135deg, #eab308, #ca8a04);
   color: #000;
   border: none;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
 }
 .rank-badge.rank-2 {
   background: linear-gradient(135deg, #e2e8f0, #94a3b8);
@@ -1469,14 +1474,172 @@ body.command-center-theme {
 }
 
 /* ==========================================================================
-   6-STRATEGY SUMMARY CARDS GRID
+   HEAD-TO-HEAD WIN RATE MATRIX & TOURNAMENT CROSS-TABLE
    ========================================================================== */
 
-.benchmark-cards-grid.six-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
+.tournament-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 1.25rem;
   margin-bottom: 1.75rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.tournament-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.tourn-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff;
+}
+
+.tourn-subtitle {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.matrix-legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.matrix-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.matrix-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.swatch-win { background: #10b981; }
+.swatch-even { background: #64748b; }
+.swatch-loss { background: #ef4444; }
+
+.tournament-matrix-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-bright);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.tournament-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.tournament-matrix-table th, .tournament-matrix-table td {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.tournament-matrix-table th {
+  background: var(--bg-panel-elevated);
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.tournament-matrix-table th.col-header {
+  font-size: 0.7rem;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tournament-matrix-table th.row-header {
+  text-align: left;
+  font-size: 0.75rem;
+  background: var(--bg-panel-elevated);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.matrix-cell {
+  transition: transform 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.matrix-cell:hover {
+  transform: scale(1.1);
+  z-index: 10;
+  position: relative;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+.matrix-cell.cell-win {
+  background: rgba(16, 185, 129, 0.22);
+  color: #34d399;
+}
+
+.matrix-cell.cell-loss {
+  background: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+.matrix-cell.cell-even {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-dim);
+}
+
+.matrix-cell.cell-self {
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   11-STRATEGY SUMMARY CARDS GRID
+   ========================================================================== */
+
+.summary-cards-section {
+  margin-bottom: 1.75rem;
+}
+
+.cards-section-header {
+  margin-bottom: 1rem;
+}
+
+.cards-section-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff;
+}
+
+.cards-section-subtitle {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.benchmark-cards-grid.eleven-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
 }
 
 .benchmark-strategy-card {
@@ -1501,6 +1664,11 @@ body.command-center-theme {
 .card-adaptive_stride { border-top: 3px solid var(--color-adaptive-stride); }
 .card-stride4_to_2 { border-top: 3px solid var(--color-stride4-to-2); }
 .card-rect_stride4 { border-top: 3px solid var(--color-rect-stride4); }
+.card-stride_5432 { border-top: 3px solid var(--color-stride-5432); }
+.card-rect_stride_5432 { border-top: 3px solid var(--color-rect-stride-5432); }
+.card-rect_checkerboard { border-top: 3px solid var(--color-rect-checkerboard); }
+.card-monte_carlo { border-top: 3px solid var(--color-monte-carlo); }
+.card-bayesian_pdf { border-top: 3px solid var(--color-bayesian-pdf); }
 
 .strat-card-header {
   display: flex;
@@ -1534,7 +1702,7 @@ body.command-center-theme {
   color: var(--text-muted);
   line-height: 1.4;
   margin-bottom: 1rem;
-  min-height: 44px;
+  min-height: 48px;
 }
 
 .strat-metrics-table {
@@ -1648,7 +1816,7 @@ body.command-center-theme {
 }
 
 .legend-toggle-pill.disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   text-decoration: line-through;
 }
 
@@ -1815,9 +1983,6 @@ body.command-center-theme {
   .battle-center-divider {
     display: none;
   }
-  .benchmark-cards-grid.six-cards-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 @media (max-width: 768px) {
@@ -1837,8 +2002,5 @@ body.command-center-theme {
   .playback-controls-row {
     flex-direction: column;
     align-items: stretch;
-  }
-  .benchmark-cards-grid.six-cards-grid {
-    grid-template-columns: 1fr;
   }
 }

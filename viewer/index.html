@@ -21,7 +21,7 @@
       </div>
       <div class="header-branding">
         <h1 class="tactical-title">BATTLESHIP <span class="accent-text">COMMAND &amp; STRATEGY LAB</span></h1>
-        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 6 ATTACK STRATEGIES • BENCHMARK LAB</div>
+        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 11 ATTACK STRATEGIES • TOURNAMENT MATRIX</div>
       </div>
     </div>
 
@@ -32,7 +32,7 @@
       </button>
       <button id="tab-btn-benchmark" class="tab-button">
         <span class="tab-icon">📊</span>
-        <span class="tab-label">Strategy Benchmark</span>
+        <span class="tab-label">Strategy Benchmark &amp; Tournament</span>
       </button>
     </div>
 
@@ -55,8 +55,13 @@
         <div class="control-group">
           <label for="select-p1-strategy">Player 1 (North Fleet):</label>
           <select id="select-p1-strategy" class="tactical-select">
-            <option value="rect_stride4" selected>Largest Rect + Stride (4→2)</option>
+            <option value="bayesian_pdf" selected>Bayesian Probability Density</option>
+            <option value="monte_carlo">Monte Carlo Sampling</option>
+            <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
+            <option value="stride_5432">Descending Stride (5→4→3→2)</option>
+            <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
             <option value="stride4_to_2">Staggered Stride (4→2)</option>
+            <option value="rect_checkerboard">Largest Rect + Checkerboard</option>
             <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
             <option value="largest_rect">Largest Empty Rect Midpoint</option>
             <option value="checkerboard">Checkerboard + Hunt/Target</option>
@@ -73,8 +78,13 @@
             <option value="checkerboard">Checkerboard + Hunt/Target</option>
             <option value="largest_rect">Largest Empty Rect Midpoint</option>
             <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
+            <option value="rect_checkerboard">Largest Rect + Checkerboard</option>
             <option value="stride4_to_2">Staggered Stride (4→2)</option>
             <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
+            <option value="stride_5432">Descending Stride (5→4→3→2)</option>
+            <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
+            <option value="monte_carlo">Monte Carlo Sampling</option>
+            <option value="bayesian_pdf">Bayesian Probability Density</option>
           </select>
         </div>
 
@@ -126,7 +136,7 @@
               <span class="player-color-tag p1-tag"></span>
               <div class="player-titles">
                 <h2 class="player-name">PLAYER 1</h2>
-                <span id="p1-strategy-label" class="player-strategy-badge">Largest Rect + Stride (4→2)</span>
+                <span id="p1-strategy-label" class="player-strategy-badge">Bayesian Probability Density</span>
               </div>
             </div>
             <div class="ai-state-indicator">
@@ -326,9 +336,9 @@
             <label for="benchmark-game-count">Simulation Sample Size (Per Strategy):</label>
             <select id="benchmark-game-count" class="tactical-select">
               <option value="100">100 Matches</option>
-              <option value="500" selected>500 Matches</option>
-              <option value="1000">1,000 Matches (Standard)</option>
-              <option value="2500">2,500 Matches (Deep Lab)</option>
+              <option value="300" selected>300 Matches (Recommended)</option>
+              <option value="500">500 Matches</option>
+              <option value="1000">1,000 Matches (Deep Lab)</option>
             </select>
           </div>
 
@@ -340,7 +350,7 @@
           <div class="benchmark-run-btn-container">
             <button id="btn-run-benchmark" class="action-btn primary-btn run-benchmark-btn">
               <span class="btn-icon">⚡</span>
-              <span id="run-benchmark-text">Run 6-Strategy Benchmark</span>
+              <span id="run-benchmark-text">Run 11-Strategy Benchmark</span>
             </button>
           </div>
         </div>
@@ -348,7 +358,7 @@
         <!-- Progress Bar Indicator -->
         <div id="benchmark-progress-container" class="benchmark-progress-wrapper" style="display: none;">
           <div class="progress-info-row">
-            <span id="benchmark-progress-status" class="progress-status-text">Simulating matches across 6 strategies...</span>
+            <span id="benchmark-progress-status" class="progress-status-text">Simulating matches across 11 strategies...</span>
             <span id="benchmark-progress-percent" class="progress-percent-text">0%</span>
           </div>
           <div class="progress-track">
@@ -357,7 +367,7 @@
         </div>
       </div>
 
-      <!-- 6-STRATEGY COMPARISON LEADERBOARD TABLE -->
+      <!-- 11-STRATEGY COMPARISON LEADERBOARD TABLE -->
       <div class="leaderboard-card">
         <div class="leaderboard-header">
           <div class="lb-title-group">
@@ -387,15 +397,42 @@
               </tr>
             </thead>
             <tbody id="leaderboard-tbody">
-              <!-- Dynamically populated rows for all 6 strategies -->
+              <!-- Dynamically populated rows for all 11 strategies -->
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- 6 STRATEGY SUMMARY CARDS GRID -->
-      <div class="benchmark-cards-grid six-cards-grid" id="benchmark-cards-grid">
-        <!-- Dynamically rendered or updated for all 6 strategies -->
+      <!-- HEAD-TO-HEAD WIN RATE MATRIX & TOURNAMENT STANDINGS -->
+      <div class="tournament-card" id="tournament-card">
+        <div class="tournament-header">
+          <div class="tourn-title-group">
+            <h3 class="tourn-title">ROUND-ROBIN TOURNAMENT CROSS-TABLE</h3>
+            <span class="tourn-subtitle">Pairwise head-to-head win % matrix (Row Strategy vs Column Strategy)</span>
+          </div>
+          <div class="matrix-legend">
+            <span class="matrix-legend-item"><span class="matrix-swatch swatch-win"></span> &gt; 55% Win</span>
+            <span class="matrix-legend-item"><span class="matrix-swatch swatch-even"></span> 45-55% Even</span>
+            <span class="matrix-legend-item"><span class="matrix-swatch swatch-loss"></span> &lt; 45% Loss</span>
+          </div>
+        </div>
+
+        <div class="tournament-matrix-wrapper">
+          <table class="tournament-matrix-table" id="tournament-matrix-table">
+            <!-- Dynamically generated 11x11 cross-table -->
+          </table>
+        </div>
+      </div>
+
+      <!-- 11 STRATEGY SUMMARY CARDS GRID -->
+      <div class="summary-cards-section">
+        <div class="cards-section-header">
+          <h3 class="cards-section-title">ALL 11 ATTACK STRATEGY PROFILES</h3>
+          <span class="cards-section-subtitle">Algorithmic mechanics and solo evaluation telemetry</span>
+        </div>
+        <div class="benchmark-cards-grid eleven-cards-grid" id="benchmark-cards-grid">
+          <!-- Dynamically rendered or updated for all 11 strategies -->
+        </div>
       </div>
 
       <!-- Turn Distribution Histogram Section -->
@@ -403,10 +440,10 @@
         <div class="histogram-header">
           <div class="hist-title-group">
             <h3 class="hist-title">MULTI-STRATEGY TURN-TO-WIN FREQUENCY DISTRIBUTION</h3>
-            <span class="hist-subtitle">Comparing probability density curves across all 6 strategies (click legend pills to toggle curves)</span>
+            <span class="hist-subtitle">Comparing probability density curves across all 11 strategies (click legend pills to toggle curves)</span>
           </div>
           <div class="hist-legend-multi" id="hist-legend-multi">
-            <!-- Dynamically populated toggle pills for all 6 strategies -->
+            <!-- Dynamically populated toggle pills for all 11 strategies -->
           </div>
         </div>
 
@@ -418,10 +455,10 @@
         <div class="parity-math-explanation">
           <div class="expl-icon">💡</div>
           <div class="expl-text">
-            <strong>The Stride &amp; Rectangular Optimization Breakthrough:</strong>
-            Standard <strong>Checkerboard</strong> reduces the hunt space by 50% using parity stride 2 (guaranteeing detection of the length-2 Destroyer). 
-            However, <strong>Staggered Stride (4→2)</strong> and <strong>Largest Rect + Stride (4→2)</strong> take this even further: by hunting on a 4-stride diagonal grid while Carrier (5) or Battleship (4) are afloat, they search with <strong>75% fewer cells</strong> during early turns, finding large capital ships rapidly before tightening to 2-stride. 
-            Furthermore, combining <strong>Largest Empty Rectangle Midpoint</strong> ensures shots are placed right into the center of large unexplored voids rather than on boundaries, drastically maximizing the chance of intersecting hidden fleets!
+            <strong>The Mathematical Progression of Battleship Algorithms:</strong><br>
+            • <strong>Parity Grid Family</strong> (Checkerboard, Adaptive Stride, Stride 4→2, Descending Stride 5→4→3→2): Exploits the pigeonhole principle where ships of length <code>L</code> must intersect cells matching <code>(r+c)%L == offset</code>, pruning the search space by up to 80% during early rounds.<br>
+            • <strong>Geometric Empty-Space Family</strong> (Largest Rect Midpoint, Rect + Stride, Rect + Checkerboard): Guarantees probe shots target the exact center of maximum unexplored territory rather than perimeter cells.<br>
+            • <strong>Probabilistic &amp; Bayesian Family</strong> (Monte Carlo Sampling, Bayesian PDF): Computes the exact combinatorial probability of remaining ship placements across all unexplored cells, naturally bridging Hunt mode and Target mode with mathematical optimality!
           </div>
         </div>
       </div>
@@ -446,7 +483,7 @@
           </div>
           <div class="mstat">
             <span class="mstat-label">WINNING STRATEGY</span>
-            <span id="mstat-strat" class="mstat-val">Largest Rect + Stride (4→2)</span>
+            <span id="mstat-strat" class="mstat-val">Bayesian Probability Density</span>
           </div>
           <div class="mstat">
             <span class="mstat-label">P1 ACCURACY</span>

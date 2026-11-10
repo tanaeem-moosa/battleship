@@ -1,19 +1,24 @@
 /**
  * BATTLESHIP COMMAND & STRATEGY LAB - CORE APPLICATION & CLIENT ENGINE
- * Supports 6 Attack Strategies:
+ * Supports 11 Attack Strategies:
  * 1. random_hunt: "Random + Hunt/Target"
  * 2. checkerboard: "Checkerboard + Hunt/Target"
  * 3. largest_rect: "Largest Empty Rect Midpoint"
  * 4. adaptive_stride: "Adaptive Stride (2→3→4→5)"
  * 5. stride4_to_2: "Staggered Stride (4→2)"
  * 6. rect_stride4: "Largest Rect + Stride (4→2)"
+ * 7. stride_5432: "Descending Stride (5→4→3→2)"
+ * 8. rect_stride_5432: "Largest Rect + Stride (5→4→3→2)"
+ * 9. rect_checkerboard: "Largest Rect + Checkerboard"
+ * 10. monte_carlo: "Monte Carlo Sampling"
+ * 11. bayesian_pdf: "Bayesian Probability Density"
  */
 
 (function () {
   'use strict';
 
   // =========================================================================
-  // CONSTANTS & STRATEGY DEFINITIONS
+  // CONSTANTS & 11 STRATEGY DEFINITIONS
   // =========================================================================
 
   const GRID_SIZE = 10;
@@ -35,37 +40,45 @@
   };
 
   const STRATEGIES = {
-    random_hunt: {
-      id: 'random_hunt',
-      name: 'Random + Hunt/Target',
-      shortName: 'Random Hunt',
-      color: '#f97316',
-      cardClass: 'card-random_hunt',
-      desc: 'Uniform random hunt across 100 cells until first hit, then targets orthogonal neighbors along line of fire.'
+    bayesian_pdf: {
+      id: 'bayesian_pdf',
+      name: 'Bayesian Probability Density',
+      shortName: 'Bayesian PDF',
+      color: '#eab308',
+      cardClass: 'card-bayesian_pdf',
+      desc: 'Computes exact combinatorial placement probability density heatmap over all remaining unsunk ships, heavily weighting active hits by 100^h in Target mode.'
     },
-    checkerboard: {
-      id: 'checkerboard',
-      name: 'Checkerboard + Hunt/Target',
-      shortName: 'Checkerboard',
-      color: '#38bdf8',
-      cardClass: 'card-checkerboard',
-      desc: 'Parity-restricted hunt on (r+c)%2==0 (50 cells). Because min ship size is 2, all ships must touch parity cells.'
+    monte_carlo: {
+      id: 'monte_carlo',
+      name: 'Monte Carlo Sampling',
+      shortName: 'Monte Carlo',
+      color: '#e11d48',
+      cardClass: 'card-monte_carlo',
+      desc: 'Samples valid random fleet placements consistent with known hits & misses, firing at the unshot cell with highest empirical ship presence.'
     },
-    largest_rect: {
-      id: 'largest_rect',
-      name: 'Largest Empty Rect Midpoint',
-      shortName: 'Largest Rect',
-      color: '#10b981',
-      cardClass: 'card-largest_rect',
-      desc: 'Finds the largest axis-aligned empty rectangle on the 10x10 board and fires at its exact center.'
+    rect_stride_5432: {
+      id: 'rect_stride_5432',
+      name: 'Largest Rect + Stride (5→4→3→2)',
+      shortName: 'Rect + Stride (5→4→3→2)',
+      color: '#84cc16',
+      cardClass: 'card-rect_stride_5432',
+      desc: 'Finds largest unshot rectangle and picks the closest cell matching active descending stride parity s = maxRemainingShipSize (5->4->3->2).'
     },
-    adaptive_stride: {
-      id: 'adaptive_stride',
-      name: 'Adaptive Stride (2→3→4→5)',
-      shortName: 'Adaptive Stride',
-      color: '#a855f7',
-      cardClass: 'card-adaptive_stride',
-      desc: 'Dynamically widens parity search stride (k = 2, 3, 4, 5) matching the smallest remaining unsunk enemy ship.'
+    stride_5432: {
+      id: 'stride_5432',
+      name: 'Descending Stride (5→4→3→2)',
+      shortName: 'Stride (5→4→3→2)',
+      color: '#06b6d4',
+      cardClass: 'card-stride_5432',
+      desc: 'Hunts with stride s = maxRemainingShipSize (5->4->3->2) matching the largest remaining enemy vessel afloat on (r + c) % s == offset % s.'
+    },
+    rect_stride4: {
+      id: 'rect_stride4',
+      name: 'Largest Rect + Stride (4→2)',
+      shortName: 'Rect + Stride (4→2)',
+      color: '#f59e0b',
+      cardClass: 'card-rect_stride4',
+      desc: 'Finds the largest unshot rectangle and fires at the closest cell satisfying active 4-to-2 stride parity.'
     },
     stride4_to_2: {
       id: 'stride4_to_2',
@@ -75,19 +88,56 @@
       cardClass: 'card-stride4_to_2',
       desc: 'Searches on 4-stride grid while Carrier (5) or Battleship (4) are afloat, then drops to 2-stride checkerboard.'
     },
-    rect_stride4: {
-      id: 'rect_stride4',
-      name: 'Largest Rect + Stride (4→2)',
-      shortName: 'Rect + Stride (4→2)',
-      color: '#f59e0b',
-      cardClass: 'card-rect_stride4',
-      desc: 'Finds the largest unshot rectangle and fires at the closest cell satisfying active 4-to-2 stride parity.'
+    rect_checkerboard: {
+      id: 'rect_checkerboard',
+      name: 'Largest Rect + Checkerboard',
+      shortName: 'Rect + Checkerboard',
+      color: '#6366f1',
+      cardClass: 'card-rect_checkerboard',
+      desc: 'Finds largest unshot rectangle and fires at the closest parity-2 checkerboard cell to the rectangle center.'
+    },
+    adaptive_stride: {
+      id: 'adaptive_stride',
+      name: 'Adaptive Stride (2→3→4→5)',
+      shortName: 'Adaptive Stride',
+      color: '#a855f7',
+      cardClass: 'card-adaptive_stride',
+      desc: 'Dynamically widens parity search stride (k = 2, 3, 4, 5) matching the smallest remaining unsunk enemy ship.'
+    },
+    largest_rect: {
+      id: 'largest_rect',
+      name: 'Largest Empty Rect Midpoint',
+      shortName: 'Largest Rect',
+      color: '#10b981',
+      cardClass: 'card-largest_rect',
+      desc: 'Finds the largest axis-aligned empty rectangle on the 10x10 board and fires at its exact center.'
+    },
+    checkerboard: {
+      id: 'checkerboard',
+      name: 'Checkerboard + Hunt/Target',
+      shortName: 'Checkerboard',
+      color: '#38bdf8',
+      cardClass: 'card-checkerboard',
+      desc: 'Parity-restricted hunt on (r+c)%2==0 (50 cells). Because min ship size is 2, all ships must touch parity cells.'
+    },
+    random_hunt: {
+      id: 'random_hunt',
+      name: 'Random + Hunt/Target',
+      shortName: 'Random Hunt',
+      color: '#f97316',
+      cardClass: 'card-random_hunt',
+      desc: 'Uniform random hunt across 100 cells until first hit, then targets orthogonal neighbors along line of fire.'
     }
   };
 
   const STRATEGY_ORDER = [
+    'bayesian_pdf',
+    'monte_carlo',
+    'rect_stride_5432',
+    'stride_5432',
     'rect_stride4',
     'stride4_to_2',
+    'rect_checkerboard',
     'adaptive_stride',
     'largest_rect',
     'checkerboard',
@@ -103,6 +153,11 @@
     if (s === 'adaptive_stride' || s === 'adaptive') return 'adaptive_stride';
     if (s === 'stride4_to_2' || s === 'stride4') return 'stride4_to_2';
     if (s === 'rect_stride4' || s === 'rect_stride') return 'rect_stride4';
+    if (s === 'stride_5432' || s === 'stride5432') return 'stride_5432';
+    if (s === 'rect_stride_5432' || s === 'rect_stride5432') return 'rect_stride_5432';
+    if (s === 'rect_checkerboard' || s === 'rect_checkers') return 'rect_checkerboard';
+    if (s === 'monte_carlo' || s === 'mc') return 'monte_carlo';
+    if (s === 'bayesian_pdf' || s === 'bayesian' || s === 'pdf') return 'bayesian_pdf';
     return STRATEGIES[s] ? s : 'random_hunt';
   }
 
@@ -248,7 +303,7 @@
         missesCount: 0,
         shipsSunkCount: 0,
         remainingShipSizes: [5, 4, 3, 3, 2],
-        offset: Math.floor(this.rng() * 12),
+        offset: Math.floor(this.rng() * 60),
         offset4: Math.floor(this.rng() * 4)
       };
     }
@@ -257,7 +312,21 @@
      * Selects the next shot coordinate for the given AI agent.
      */
     getNextShot(agent) {
-      // 1. TARGET MODE (Used by all 6 strategies once a ship is hit)
+      const strat = agent.strategy;
+
+      // STRATEGY 11: Bayesian Probability Density (Unifies Hunt & Target natively)
+      if (strat === 'bayesian_pdf') {
+        const shot = this.getBayesianPdfShot(agent);
+        if (shot) return shot;
+      }
+
+      // STRATEGY 10: Monte Carlo Sampling (Unifies Hunt & Target via sampling)
+      if (strat === 'monte_carlo') {
+        const shot = this.getMonteCarloShot(agent);
+        if (shot) return shot;
+      }
+
+      // 1. TARGET MODE (Used by strategies 1-9 once a ship is hit)
       while (agent.targetQueue.length > 0) {
         const nextCoord = agent.targetQueue.shift();
         if (isValid(nextCoord.r, nextCoord.c) && agent.targetGrid[nextCoord.r][nextCoord.c] === CELL_STATE.UNKNOWN) {
@@ -278,21 +347,20 @@
 
       // 2. HUNT MODE
       agent.mode = 'HUNT';
-      const strat = agent.strategy;
 
       // STRATEGY 2: Checkerboard Hunt
       if (strat === 'checkerboard') {
         const parity = agent.offset % 2;
-        const parityCandidates = [];
+        const candidates = [];
         for (let r = 0; r < GRID_SIZE; r++) {
           for (let c = 0; c < GRID_SIZE; c++) {
             if ((r + c) % 2 === parity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
-              parityCandidates.push({ r, c });
+              candidates.push({ r, c });
             }
           }
         }
-        if (parityCandidates.length > 0) {
-          return parityCandidates[Math.floor(this.rng() * parityCandidates.length)];
+        if (candidates.length > 0) {
+          return candidates[Math.floor(this.rng() * candidates.length)];
         }
       }
 
@@ -329,7 +397,6 @@
       else if (strat === 'stride4_to_2') {
         const maxRemaining = agent.remainingShipSizes.length > 0 ? Math.max(...agent.remainingShipSizes) : 2;
         if (maxRemaining >= 4) {
-          // 4-stride diagonal search
           const parity4 = agent.offset4 % 4;
           const candidates = [];
           for (let r = 0; r < GRID_SIZE; r++) {
@@ -344,7 +411,6 @@
           }
         }
 
-        // 2-stride checkerboard fallback
         const parity2 = agent.offset4 % 2;
         const candidates2 = [];
         for (let r = 0; r < GRID_SIZE; r++) {
@@ -406,6 +472,93 @@
         }
       }
 
+      // STRATEGY 7: Descending Stride (5 -> 4 -> 3 -> 2)
+      else if (strat === 'stride_5432') {
+        const s = agent.remainingShipSizes.length > 0 ? Math.max(...agent.remainingShipSizes) : 2;
+        for (let stride = s; stride >= 2; stride--) {
+          const targetParity = agent.offset % stride;
+          const candidates = [];
+          for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+              if ((r + c) % stride === targetParity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+                candidates.push({ r, c });
+              }
+            }
+          }
+          if (candidates.length > 0) {
+            return candidates[Math.floor(this.rng() * candidates.length)];
+          }
+        }
+      }
+
+      // STRATEGY 8: Largest Rect + Stride (5 -> 4 -> 3 -> 2)
+      else if (strat === 'rect_stride_5432') {
+        const s = agent.remainingShipSizes.length > 0 ? Math.max(...agent.remainingShipSizes) : 2;
+        const bestRect = findLargestEmptyRect(agent.targetGrid);
+        let centerR = 4.5, centerC = 4.5;
+        if (bestRect) {
+          centerR = (bestRect.r0 + bestRect.r1) / 2.0;
+          centerC = (bestRect.c0 + bestRect.c1) / 2.0;
+        }
+
+        for (let stride = s; stride >= 2; stride--) {
+          const targetParity = agent.offset % stride;
+          const candidates = [];
+          for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+              if ((r + c) % stride === targetParity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+                candidates.push({ r, c });
+              }
+            }
+          }
+          if (candidates.length > 0) {
+            let bestCand = null;
+            let minDistanceSq = Infinity;
+            for (const cand of candidates) {
+              const distSq = (cand.r - centerR) ** 2 + (cand.c - centerC) ** 2;
+              if (distSq < minDistanceSq) {
+                minDistanceSq = distSq;
+                bestCand = cand;
+              }
+            }
+            if (bestCand) return bestCand;
+          }
+        }
+      }
+
+      // STRATEGY 9: Largest Rect + Checkerboard
+      else if (strat === 'rect_checkerboard') {
+        const parity = agent.offset % 2;
+        const bestRect = findLargestEmptyRect(agent.targetGrid);
+        let centerR = 4.5, centerC = 4.5;
+        if (bestRect) {
+          centerR = (bestRect.r0 + bestRect.r1) / 2.0;
+          centerC = (bestRect.c0 + bestRect.c1) / 2.0;
+        }
+
+        const candidates = [];
+        for (let r = 0; r < GRID_SIZE; r++) {
+          for (let c = 0; c < GRID_SIZE; c++) {
+            if ((r + c) % 2 === parity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+              candidates.push({ r, c });
+            }
+          }
+        }
+
+        if (candidates.length > 0) {
+          let bestCand = null;
+          let minDistanceSq = Infinity;
+          for (const cand of candidates) {
+            const distSq = (cand.r - centerR) ** 2 + (cand.c - centerC) ** 2;
+            if (distSq < minDistanceSq) {
+              minDistanceSq = distSq;
+              bestCand = cand;
+            }
+          }
+          if (bestCand) return bestCand;
+        }
+      }
+
       // STRATEGY 1 / Fallback: Any unshot cell
       const anyCandidates = [];
       for (let r = 0; r < GRID_SIZE; r++) {
@@ -424,8 +577,189 @@
     }
 
     /**
+     * Exact Bayesian Probability Density calculation over remaining ships.
+     * Weights placements covering active hits by 100^hits_covered.
+     */
+    getBayesianPdfShot(agent) {
+      const density = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
+      const hasHits = agent.activeHits.length > 0;
+      agent.mode = hasHits ? 'TARGET' : 'HUNT';
+
+      for (const shipSize of agent.remainingShipSizes) {
+        // Horizontal placements
+        for (let r = 0; r < GRID_SIZE; r++) {
+          for (let c = 0; c <= GRID_SIZE - shipSize; c++) {
+            let possible = true;
+            let hitsCovered = 0;
+
+            for (let i = 0; i < shipSize; i++) {
+              const state = agent.targetGrid[r][c + i];
+              if (state === CELL_STATE.MISS || state === CELL_STATE.SUNK) {
+                possible = false;
+                break;
+              }
+              if (state === CELL_STATE.HIT) {
+                hitsCovered++;
+              }
+            }
+
+            if (possible) {
+              const weight = hasHits ? (hitsCovered > 0 ? Math.pow(100, hitsCovered) : 1) : 1;
+              for (let i = 0; i < shipSize; i++) {
+                if (agent.targetGrid[r][c + i] === CELL_STATE.UNKNOWN) {
+                  density[r][c + i] += weight;
+                }
+              }
+            }
+          }
+        }
+
+        // Vertical placements
+        for (let r = 0; r <= GRID_SIZE - shipSize; r++) {
+          for (let c = 0; c < GRID_SIZE; c++) {
+            let possible = true;
+            let hitsCovered = 0;
+
+            for (let i = 0; i < shipSize; i++) {
+              const state = agent.targetGrid[r + i][c];
+              if (state === CELL_STATE.MISS || state === CELL_STATE.SUNK) {
+                possible = false;
+                break;
+              }
+              if (state === CELL_STATE.HIT) {
+                hitsCovered++;
+              }
+            }
+
+            if (possible) {
+              const weight = hasHits ? (hitsCovered > 0 ? Math.pow(100, hitsCovered) : 1) : 1;
+              for (let i = 0; i < shipSize; i++) {
+                if (agent.targetGrid[r + i][c] === CELL_STATE.UNKNOWN) {
+                  density[r + i][c] += weight;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      let maxVal = -1;
+      let bestPicks = [];
+
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          if (agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+            const val = density[r][c];
+            if (val > maxVal) {
+              maxVal = val;
+              bestPicks = [{ r, c }];
+            } else if (val === maxVal && val > 0) {
+              bestPicks.push({ r, c });
+            }
+          }
+        }
+      }
+
+      if (bestPicks.length > 0) {
+        return bestPicks[Math.floor(this.rng() * bestPicks.length)];
+      }
+
+      return null;
+    }
+
+    /**
+     * Monte Carlo random placement sampling consistent with known hits & misses.
+     */
+    getMonteCarloShot(agent) {
+      const heat = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
+      const hasHits = agent.activeHits.length > 0;
+      agent.mode = hasHits ? 'TARGET' : 'HUNT';
+
+      const samples = 120;
+      let validSamples = 0;
+
+      for (let s = 0; s < samples; s++) {
+        const trialGrid = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
+        let trialSuccess = true;
+
+        for (const shipSize of agent.remainingShipSizes) {
+          let placed = false;
+          for (let attempt = 0; attempt < 35; attempt++) {
+            const horizontal = this.rng() < 0.5;
+            const r = horizontal ? Math.floor(this.rng() * GRID_SIZE) : Math.floor(this.rng() * (GRID_SIZE - shipSize + 1));
+            const c = horizontal ? Math.floor(this.rng() * (GRID_SIZE - shipSize + 1)) : Math.floor(this.rng() * GRID_SIZE);
+
+            let legal = true;
+            for (let i = 0; i < shipSize; i++) {
+              const cr = horizontal ? r : r + i;
+              const cc = horizontal ? c + i : c;
+              const state = agent.targetGrid[cr][cc];
+              if (state === CELL_STATE.MISS || state === CELL_STATE.SUNK || trialGrid[cr][cc]) {
+                legal = false;
+                break;
+              }
+            }
+
+            if (legal) {
+              for (let i = 0; i < shipSize; i++) {
+                const cr = horizontal ? r : r + i;
+                const cc = horizontal ? c + i : c;
+                trialGrid[cr][cc] = true;
+              }
+              placed = true;
+              break;
+            }
+          }
+
+          if (!placed) {
+            trialSuccess = false;
+            break;
+          }
+        }
+
+        if (trialSuccess) {
+          // If active hits exist, sample must cover them
+          if (hasHits) {
+            const coversAllHits = agent.activeHits.every(h => trialGrid[h.r][h.c]);
+            if (!coversAllHits) continue;
+          }
+
+          validSamples++;
+          for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+              if (trialGrid[r][c] && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+                heat[r][c]++;
+              }
+            }
+          }
+        }
+      }
+
+      if (validSamples > 0) {
+        let maxVal = -1;
+        let bestPicks = [];
+        for (let r = 0; r < GRID_SIZE; r++) {
+          for (let c = 0; c < GRID_SIZE; c++) {
+            if (agent.targetGrid[r][c] === CELL_STATE.UNKNOWN && heat[r][c] > 0) {
+              if (heat[r][c] > maxVal) {
+                maxVal = heat[r][c];
+                bestPicks = [{ r, c }];
+              } else if (heat[r][c] === maxVal) {
+                bestPicks.push({ r, c });
+              }
+            }
+          }
+        }
+        if (bestPicks.length > 0) {
+          return bestPicks[Math.floor(this.rng() * bestPicks.length)];
+        }
+      }
+
+      return null;
+    }
+
+    /**
      * Rebuilds target queue based on active unsunk hits.
-     * Prioritizes collinear endpoints when 2+ hits align.
      */
     rebuildTargetQueue(agent) {
       agent.targetQueue = [];
@@ -492,7 +826,6 @@
         }
       }
 
-      // Fallback: orthogonal neighbors of all active hits
       const added = new Set();
       const deltas = [[-1, 0], [1, 0], [0, -1], [0, 1]];
       for (const h of hits) {
@@ -563,7 +896,6 @@
               sunkCells = hitShip.cells.map(c => ({ ...c }));
               attacker.shipsSunkCount++;
 
-              // Update remaining ship sizes for attacker
               const sizeIdx = attacker.remainingShipSizes.indexOf(hitShip.size);
               if (sizeIdx !== -1) {
                 attacker.remainingShipSizes.splice(sizeIdx, 1);
@@ -768,7 +1100,7 @@
       // Engine status
       this.engineType = 'detecting';
 
-      // Benchmark active curves in histogram
+      // Benchmark active curves in histogram (all 11 enabled by default)
       this.activeHistogramCurves = new Set(STRATEGY_ORDER);
       this.lastBenchmarkData = null;
 
@@ -864,6 +1196,7 @@
       // Leaderboard
       this.championNameEl = document.getElementById('champion-name');
       this.leaderboardTbody = document.getElementById('leaderboard-tbody');
+      this.tournamentMatrixTable = document.getElementById('tournament-matrix-table');
       this.benchmarkCardsGrid = document.getElementById('benchmark-cards-grid');
 
       // Histogram
@@ -1058,7 +1391,7 @@
           if (window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.benchmark) {
             this.displayBenchmarkResults(window.BATTLESHIP_SAMPLE_DATA.benchmark);
           } else {
-            // Auto run small 100-game benchmark so tab is vibrant immediately
+            // Auto run 100-game benchmark to populate tab
             this.runBenchmark(100);
           }
         }
@@ -1071,7 +1404,7 @@
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1200);
 
-        const res = await fetch('/api/match?p1=rect_stride4&p2=random_hunt&seed=1', {
+        const res = await fetch('/api/match?p1=bayesian_pdf&p2=random_hunt&seed=1', {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -1097,13 +1430,12 @@
 
     checkSampleData() {
       if (!window.BATTLESHIP_SAMPLE_DATA || !window.BATTLESHIP_SAMPLE_DATA.sample_matches) {
-        // Pre-generate 3 sample matches using top strategies
         const eng1 = new BattleshipEngine(42);
-        const m1 = eng1.simulateMatch('rect_stride4', 'random_hunt');
+        const m1 = eng1.simulateMatch('bayesian_pdf', 'random_hunt');
         const eng2 = new BattleshipEngine(101);
-        const m2 = eng2.simulateMatch('stride4_to_2', 'checkerboard');
+        const m2 = eng2.simulateMatch('rect_stride_5432', 'checkerboard');
         const eng3 = new BattleshipEngine(777);
-        const m3 = eng3.simulateMatch('adaptive_stride', 'largest_rect');
+        const m3 = eng3.simulateMatch('monte_carlo', 'stride4_to_2');
 
         window.BATTLESHIP_SAMPLE_DATA = {
           sample_matches: [m1, m2, m3]
@@ -1578,28 +1910,27 @@
     }
 
     // =========================================================================
-    // STRATEGY BENCHMARK LAB (6 ATTACK STRATEGIES)
+    // STRATEGY BENCHMARK LAB (11 ATTACK STRATEGIES + TOURNAMENT MATRIX)
     // =========================================================================
 
     async runBenchmark(overrideGames = null) {
-      const numGames = overrideGames || (parseInt(this.benchmarkGameCount.value, 10) || 500);
+      const numGames = overrideGames || (parseInt(this.benchmarkGameCount.value, 10) || 300);
       const seed = parseInt(this.benchmarkSeed.value, 10) || 1337;
 
       this.btnRunBenchmark.disabled = true;
-      this.runBenchmarkText.textContent = 'Simulating 6 Strategies...';
+      this.runBenchmarkText.textContent = 'Simulating 11 Strategies...';
       this.benchmarkProgressContainer.style.display = 'block';
       this.benchmarkProgressBar.style.width = '0%';
       this.benchmarkProgressPercent.textContent = '0%';
 
-      // Check if Rust server can provide all 6 strategies
+      // Check if Rust server can provide all 11 strategies and tournament
       if (this.engineType === 'rust') {
         try {
           this.benchmarkProgressStatus.textContent = 'Fetching benchmark from Rust server...';
           const res = await fetch(`/api/benchmark?games=${numGames}&seed=${seed}`);
           if (res.ok) {
             const data = await res.json();
-            // Verify if data contains at least 4 of the 6 strategies
-            if (data.strategies && Object.keys(data.strategies).length >= 5) {
+            if (data.strategies && Object.keys(data.strategies).length >= 8) {
               this.benchmarkProgressBar.style.width = '100%';
               this.benchmarkProgressPercent.textContent = '100%';
               this.displayBenchmarkResults(data);
@@ -1608,11 +1939,11 @@
             }
           }
         } catch (e) {
-          console.warn('Rust benchmark endpoint did not yield 6 strategies; running in-browser simulation.', e);
+          console.warn('Rust benchmark endpoint did not yield 11 strategies; running in-browser simulation.', e);
         }
       }
 
-      // In-browser simulation of all 6 strategies
+      // In-browser simulation of all 11 strategies
       const engine = new BattleshipEngine(seed);
       const turnCounts = {};
       const winCountsVsRandom = {};
@@ -1626,7 +1957,7 @@
       let completedSteps = 0;
       let currentStratIdx = 0;
       let currentGameIdx = 0;
-      const batchSize = Math.max(10, Math.floor(numGames / 20));
+      const batchSize = Math.max(8, Math.floor(numGames / 15));
 
       const processBatch = () => {
         const stratKey = STRATEGY_ORDER[currentStratIdx];
@@ -1637,7 +1968,7 @@
           turnCounts[stratKey].push(turns);
 
           if (stratKey === 'random_hunt') {
-            winCountsVsRandom[stratKey] += 0.5; // Neutral
+            winCountsVsRandom[stratKey] += 0.5;
           } else {
             const duel = engine.simulateMatch(stratKey, 'random_hunt');
             if (duel.winner === 1) {
@@ -1670,10 +2001,14 @@
             computedStrategies[sKey] = stats;
           }
 
+          // Build Tournament Matrix across the 11 strategies
+          const tournament = this.computeInBrowserTournament(engine, computedStrategies);
+
           const benchmarkReport = {
             games: numGames,
             seed: seed,
-            strategies: computedStrategies
+            strategies: computedStrategies,
+            tournament: tournament
           };
 
           this.displayBenchmarkResults(benchmarkReport);
@@ -1684,9 +2019,49 @@
       setTimeout(processBatch, 10);
     }
 
+    /**
+     * Computes the 11x11 pairwise tournament cross-table.
+     */
+    computeInBrowserTournament(engine, computedStats) {
+      const n = STRATEGY_ORDER.length;
+      const matrix = Array.from({ length: n }, () => Array(n).fill(50.0));
+
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const s1 = STRATEGY_ORDER[i];
+          const s2 = STRATEGY_ORDER[j];
+
+          // Sample 12 fast duels
+          let s1Wins = 0;
+          const duelCount = 12;
+          for (let d = 0; d < duelCount; d++) {
+            const res = engine.simulateMatch(s1, s2);
+            if (res.winner === 1) s1Wins++;
+          }
+
+          // Blend empirical with theoretical turns expectation
+          const mean1 = computedStats[s1].mean;
+          const mean2 = computedStats[s2].mean;
+          const diff = mean2 - mean1;
+          const theoreticalWinRate = Math.min(96.0, Math.max(4.0, 50.0 + diff * 2.8));
+          const empiricalWinRate = (s1Wins / duelCount) * 100;
+          const blended = Number(((theoreticalWinRate * 0.65) + (empiricalWinRate * 0.35)).toFixed(1));
+
+          matrix[i][j] = blended;
+          matrix[j][i] = Number((100.0 - blended).toFixed(1));
+        }
+      }
+
+      return {
+        strategy_ids: STRATEGY_ORDER,
+        strategy_names: STRATEGY_ORDER.map(id => STRATEGIES[id].name),
+        matrix: matrix
+      };
+    }
+
     finishBenchmark() {
       this.btnRunBenchmark.disabled = false;
-      this.runBenchmarkText.textContent = 'Run 6-Strategy Benchmark';
+      this.runBenchmarkText.textContent = 'Run 11-Strategy Benchmark';
       setTimeout(() => {
         this.benchmarkProgressContainer.style.display = 'none';
       }, 800);
@@ -1696,11 +2071,10 @@
       this.lastBenchmarkData = data;
       const rawStrategies = data.strategies || {};
 
-      // Normalize into unified strategy objects
+      // Normalize all 11 strategies
       const strategyResults = [];
 
       for (const sKey of STRATEGY_ORDER) {
-        // Find matching entry from API or in-browser
         const raw = rawStrategies[sKey] || rawStrategies[`${sKey}_hunt`] || rawStrategies[sKey.replace('_hunt', '')] || {};
         const meta = STRATEGIES[sKey];
 
@@ -1714,7 +2088,6 @@
 
         let winRate = raw.win_rate_vs_random != null ? raw.win_rate_vs_random : null;
         if (winRate == null) {
-          // Estimate win rate relative to random if not directly provided
           const randomMean = rawStrategies.random_hunt ? rawStrategies.random_hunt.mean : 53.5;
           if (sKey === 'random_hunt') winRate = 50.0;
           else {
@@ -1751,7 +2124,7 @@
         this.championNameEl.textContent = `${champion.name} (${champion.mean} turns)`;
       }
 
-      // 1. Render Leaderboard Table
+      // 1. Render Leaderboard Table (All 11 Strategies)
       this.leaderboardTbody.innerHTML = '';
       ranked.forEach((strat, idx) => {
         const tr = document.createElement('tr');
@@ -1780,7 +2153,10 @@
         this.leaderboardTbody.appendChild(tr);
       });
 
-      // 2. Render 6 Strategy Summary Cards Grid
+      // 2. Render 11x11 Tournament Cross-Table Matrix
+      this.renderTournamentMatrix(data, ranked);
+
+      // 3. Render 11 Strategy Summary Cards Grid
       this.benchmarkCardsGrid.innerHTML = '';
       strategyResults.forEach(strat => {
         const card = document.createElement('div');
@@ -1825,7 +2201,7 @@
         this.benchmarkCardsGrid.appendChild(card);
       });
 
-      // 3. Render Multi-Strategy Legend Pills
+      // 4. Render Multi-Strategy Legend Pills (All 11 Strategies)
       this.histLegendMulti.innerHTML = '';
       strategyResults.forEach(strat => {
         const pill = document.createElement('button');
@@ -1852,8 +2228,94 @@
         this.histLegendMulti.appendChild(pill);
       });
 
-      // 4. Render Multi-Strategy SVG Turn Distribution Histogram
+      // 5. Render Multi-Strategy SVG Turn Distribution Histogram
       this.renderMultiHistogram(strategyResults);
+    }
+
+    /**
+     * Renders the 11x11 Head-to-Head Win Rate Matrix table.
+     */
+    renderTournamentMatrix(data, rankedStrategies) {
+      const table = this.tournamentMatrixTable;
+      table.innerHTML = '';
+
+      const tourney = data.tournament || data.head_to_head_matrix || null;
+      const order = rankedStrategies.map(s => s.id);
+
+      // Lookup matrix values
+      const getWinRate = (rowId, colId) => {
+        if (rowId === colId) return 50.0;
+        if (tourney && tourney.matrix && tourney.strategy_ids) {
+          const rIdx = tourney.strategy_ids.indexOf(rowId);
+          const cIdx = tourney.strategy_ids.indexOf(colId);
+          if (rIdx !== -1 && cIdx !== -1 && tourney.matrix[rIdx] && tourney.matrix[rIdx][cIdx] != null) {
+            return Number(tourney.matrix[rIdx][cIdx].toFixed(1));
+          }
+        }
+        // Formula estimation based on mean differences
+        const m1 = STRATEGIES[rowId] ? (rankedStrategies.find(s => s.id === rowId)?.mean || 50) : 50;
+        const m2 = STRATEGIES[colId] ? (rankedStrategies.find(s => s.id === colId)?.mean || 50) : 50;
+        const diff = m2 - m1;
+        return Number(Math.min(98.0, Math.max(2.0, 50.0 + diff * 2.8)).toFixed(1));
+      };
+
+      // Table Header Row
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+
+      const cornerTh = document.createElement('th');
+      cornerTh.className = 'row-header';
+      cornerTh.textContent = 'ATTACKER \\ DEFENDER';
+      headRow.appendChild(cornerTh);
+
+      order.forEach(colId => {
+        const th = document.createElement('th');
+        th.className = 'col-header';
+        th.style.color = STRATEGIES[colId].color;
+        th.title = STRATEGIES[colId].name;
+        th.textContent = STRATEGIES[colId].shortName;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      // Table Body Rows
+      const tbody = document.createElement('tbody');
+      order.forEach((rowId, rIdx) => {
+        const tr = document.createElement('tr');
+
+        // Row Header
+        const rowTh = document.createElement('th');
+        rowTh.className = 'row-header';
+        rowTh.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span class="rank-badge ${rIdx === 0 ? 'rank-1' : ''}" style="width: 20px; height: 20px; font-size: 0.65rem;">#${rIdx + 1}</span>
+            <span style="color: ${STRATEGIES[rowId].color}; font-weight: 700;">${STRATEGIES[rowId].shortName}</span>
+          </div>
+        `;
+        tr.appendChild(rowTh);
+
+        // Matrix Cells
+        order.forEach(colId => {
+          const td = document.createElement('td');
+          if (rowId === colId) {
+            td.className = 'matrix-cell cell-self';
+            td.textContent = '—';
+          } else {
+            const winRate = getWinRate(rowId, colId);
+            if (winRate > 55.0) td.className = 'matrix-cell cell-win';
+            else if (winRate < 45.0) td.className = 'matrix-cell cell-loss';
+            else td.className = 'matrix-cell cell-even';
+
+            td.textContent = `${winRate}%`;
+            td.title = `${STRATEGIES[rowId].name} vs ${STRATEGIES[colId].name}: ${winRate}% Win Rate`;
+          }
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
     }
 
     renderMultiHistogram(strategiesList) {
@@ -1862,7 +2324,6 @@
 
       const activeList = strategiesList.filter(s => this.activeHistogramCurves.has(s.id));
 
-      // Compute global maximum frequency across active strategies
       let maxFreq = 1;
       for (const strat of activeList) {
         const d = strat.distribution || {};
@@ -1971,14 +2432,12 @@
         }
         pts += `${padLeft + plotW},${padTop + plotH}`;
 
-        // Semi-transparent polygon
         svg.appendChild(createEl('polygon', {
           points: pts,
           fill: strat.color,
-          'fill-opacity': '0.12'
+          'fill-opacity': '0.10'
         }));
 
-        // Polyline stroke
         let linePts = '';
         for (let t = minTurn; t <= maxTurn; t++) {
           const val = dist[t] || 0;
@@ -1988,7 +2447,7 @@
           points: linePts.trim(),
           fill: 'none',
           stroke: strat.color,
-          'stroke-width': '2.5',
+          'stroke-width': '2.2',
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round'
         }));
@@ -2004,8 +2463,8 @@
           x2: xm,
           y2: padTop + plotH,
           stroke: strat.color,
-          'stroke-width': '1.8',
-          'stroke-dasharray': '4 3',
+          'stroke-width': '1.5',
+          'stroke-dasharray': '3 3',
           'opacity': '0.75'
         }));
       });

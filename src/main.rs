@@ -22,9 +22,9 @@ USAGE:
     cargo run -- [SUBCOMMAND] [OPTIONS]
 
 SUBCOMMANDS:
-    simulate (default)  Run multi-game statistical benchmark of all 6 attack strategies
-                        and complete 6x6 round-robin head-to-head tournament.
-                        Prints summary table, tournament standings, 6x6 matrix &
+    simulate (default)  Run multi-game statistical benchmark of all 11 attack strategies
+                        and complete 11x11 round-robin head-to-head tournament.
+                        Prints summary table, tournament standings, 11x11 matrix &
                         ASCII histogram to stdout, and writes `viewer/sample_data.js`.
                         Options:
                           --games <N>    Number of games per strategy (default: 1000)
@@ -35,12 +35,17 @@ SUBCOMMANDS:
                           --p1 <STRAT>   Player 1 strategy (default: random_hunt)
                           --p2 <STRAT>   Player 2 strategy (default: checkerboard)
                                          Available:
-                                           - random_hunt     ("Random + Hunt/Target")
-                                           - checkerboard    ("Checkerboard + Hunt/Target")
-                                           - largest_rect    ("Largest Empty Rect Midpoint")
-                                           - adaptive_stride ("Adaptive Stride (2->3->4->5)")
-                                           - stride4_to_2    ("Staggered Stride (4->2)")
-                                           - rect_stride4    ("Largest Rect + Stride (4->2)")
+                                           - random_hunt       ("Random + Hunt/Target")
+                                           - checkerboard      ("Checkerboard + Hunt/Target")
+                                           - largest_rect      ("Largest Empty Rect Midpoint")
+                                           - adaptive_stride   ("Adaptive Stride (2->3->4->5)")
+                                           - stride4_to_2      ("Staggered Stride (4->2)")
+                                           - rect_stride4      ("Largest Rect + Stride (4->2)")
+                                           - stride_5432       ("Descending Stride (5->4->3->2)")
+                                           - rect_stride_5432  ("Largest Rect + Stride (5->4->3->2)")
+                                           - rect_checkerboard ("Largest Rect + Checkerboard")
+                                           - monte_carlo       ("Monte Carlo Sampling")
+                                           - bayesian_pdf      ("Bayesian Probability Density")
                           --seed <S>     PRNG seed (default: 42)
 
     serve               Start local HTTP server serving web viewer and REST APIs.
@@ -51,7 +56,7 @@ SUBCOMMANDS:
 
 EXAMPLES:
     cargo run -- simulate --games 1000 --seed 42
-    cargo run -- match --p1 rect_stride4 --p2 checkerboard --seed 123
+    cargo run -- match --p1 bayesian_pdf --p2 monte_carlo --seed 123
     cargo run -- serve --port 8080
 "#
     );
@@ -111,14 +116,16 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let report = run_benchmark(games, seed);
     print_benchmark_summary(&report);
 
-    // Pre-generate 6 diverse sample matches showcasing all strategies for the browser viewer:
+    // Pre-generate diverse sample matches showcasing all strategies for the browser viewer:
     let sample_configs = [
-        ("Random + Hunt/Target", "random_hunt", "Checkerboard + Hunt/Target", "checkerboard", seed),
-        ("Checkerboard + Hunt/Target", "checkerboard", "Largest Rect + Stride (4->2)", "rect_stride4", seed + 101),
-        ("Staggered Stride (4->2)", "stride4_to_2", "Adaptive Stride (2->3->4->5)", "adaptive_stride", seed + 202),
-        ("Largest Empty Rect Midpoint", "largest_rect", "Random + Hunt/Target", "random_hunt", seed + 303),
+        ("Bayesian Probability Density", "bayesian_pdf", "Monte Carlo Sampling", "monte_carlo", seed + 505),
+        ("Bayesian Probability Density", "bayesian_pdf", "Largest Rect + Stride (4->2)", "rect_stride4", seed + 101),
+        ("Monte Carlo Sampling", "monte_carlo", "Largest Rect + Stride (5->4->3->2)", "rect_stride_5432", seed + 606),
+        ("Descending Stride (5->4->3->2)", "stride_5432", "Largest Rect + Checkerboard", "rect_checkerboard", seed + 707),
         ("Largest Rect + Stride (4->2)", "rect_stride4", "Staggered Stride (4->2)", "stride4_to_2", seed + 777),
-        ("Adaptive Stride (2->3->4->5)", "adaptive_stride", "Checkerboard + Hunt/Target", "checkerboard", seed + 999),
+        ("Staggered Stride (4->2)", "stride4_to_2", "Adaptive Stride (2->3->4->5)", "adaptive_stride", seed + 202),
+        ("Largest Empty Rect Midpoint", "largest_rect", "Checkerboard + Hunt/Target", "checkerboard", seed + 303),
+        ("Checkerboard + Hunt/Target", "checkerboard", "Random + Hunt/Target", "random_hunt", seed),
     ];
 
     let mut sample_matches = Vec::new();

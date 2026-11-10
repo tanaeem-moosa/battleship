@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 use crate::rng::Rng;
 use crate::sim::{run_benchmark, simulate_match};
 use crate::strategy::{
-    AdaptiveStrideUpAttack, AttackStrategy, CheckerboardAttack, HuntAndTargetAttack,
-    LargestRectMidpointAttack, RandomDefense, RectStrideFourAttack, StaggeredFourToTwoAttack,
+    AdaptiveStrideUpAttack, AttackStrategy, BayesianPdfAttack, CheckerboardAttack,
+    DescendingStrideAttack, HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack,
+    RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack, RectStrideFourAttack,
+    StaggeredFourToTwoAttack,
 };
 
 /// Instantiate an attack strategy from its CLI / URL string identifier.
@@ -46,9 +48,29 @@ pub fn create_strategy(id: &str) -> (Box<dyn AttackStrategy>, &'static str) {
             Box::new(RectStrideFourAttack::new()),
             "Largest Rect + Stride (4->2)",
         ),
+        "stride_5432" | "descending_stride" | "stride5432" | "descending" => (
+            Box::new(DescendingStrideAttack::new()),
+            "Descending Stride (5->4->3->2)",
+        ),
+        "rect_stride_5432" | "rect_descending" | "rect_stride5432" | "largest_rect_descending" => (
+            Box::new(RectDescendingStrideAttack::new()),
+            "Largest Rect + Stride (5->4->3->2)",
+        ),
+        "rect_checkerboard" | "rect_parity" | "largest_rect_checkerboard" => (
+            Box::new(RectCheckerboardAttack::new()),
+            "Largest Rect + Checkerboard",
+        ),
+        "monte_carlo" | "mc" | "sampling" | "monte_carlo_sampling" => (
+            Box::new(MonteCarloAttack::new()),
+            "Monte Carlo Sampling",
+        ),
+        "bayesian_pdf" | "bayesian" | "pdf" | "probability_density" | "bayes" => (
+            Box::new(BayesianPdfAttack::new()),
+            "Bayesian Probability Density",
+        ),
         _ => (
-            Box::new(CheckerboardAttack::new()),
-            "Checkerboard + Hunt/Target",
+            Box::new(BayesianPdfAttack::new()),
+            "Bayesian Probability Density",
         ),
     }
 }
@@ -351,5 +373,25 @@ mod tests {
         let (s6, name6) = create_strategy("rect_stride4");
         assert_eq!(name6, "Largest Rect + Stride (4->2)");
         assert_eq!(s6.current_mode(), "rect_stride4");
+
+        let (s7, name7) = create_strategy("stride_5432");
+        assert_eq!(name7, "Descending Stride (5->4->3->2)");
+        assert_eq!(s7.current_mode(), "stride_5432");
+
+        let (s8, name8) = create_strategy("rect_stride_5432");
+        assert_eq!(name8, "Largest Rect + Stride (5->4->3->2)");
+        assert_eq!(s8.current_mode(), "rect_stride_5432");
+
+        let (s9, name9) = create_strategy("rect_checkerboard");
+        assert_eq!(name9, "Largest Rect + Checkerboard");
+        assert_eq!(s9.current_mode(), "rect_checkerboard");
+
+        let (s10, name10) = create_strategy("monte_carlo");
+        assert_eq!(name10, "Monte Carlo Sampling");
+        assert_eq!(s10.current_mode(), "monte_carlo");
+
+        let (s11, name11) = create_strategy("bayesian_pdf");
+        assert_eq!(name11, "Bayesian Probability Density");
+        assert_eq!(s11.current_mode(), "bayesian_pdf");
     }
 }

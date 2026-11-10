@@ -966,6 +966,825 @@ impl AttackStrategy for RectStrideFourAttack {
     }
 }
 
+/// Attack Strategy 7: Descending Stride (5 -> 4 -> 3 -> 2)
+/// - Hunt mode: Active stride s starts at max remaining ship length (5 while Carrier is alive,
+///   4 once Carrier sinks, 3 once Battleship sinks, 2 when only Destroyer remains).
+///   Hunts on grid (r + c) % s == (offset % s).
+/// - Target mode: Smart collinear and orthogonal hunt-down.
+#[derive(Clone, Debug)]
+pub struct DescendingStrideAttack {
+    tracker: TargetTracker,
+    offset: Option<usize>,
+    mode: &'static str,
+}
+
+impl Default for DescendingStrideAttack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DescendingStrideAttack {
+    pub fn new() -> Self {
+        Self {
+            tracker: TargetTracker::new(),
+            offset: None,
+            mode: "stride_5432",
+        }
+    }
+}
+
+impl AttackStrategy for DescendingStrideAttack {
+    fn name(&self) -> &'static str {
+        "Descending Stride (5->4->3->2)"
+    }
+
+    fn reset(&mut self) {
+        self.tracker.reset();
+        self.offset = None;
+        self.mode = "stride_5432";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        let offset = *self.offset.get_or_insert_with(|| rng.next_usize(60));
+
+        if self.tracker.is_targeting() {
+            if let Some(target_pos) = self.tracker.choose_target_shot(view, rng) {
+                self.mode = "target";
+                return target_pos;
+            }
+            self.tracker.reset();
+        }
+
+        self.mode = "stride_5432";
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let max_len = view.max_remaining_ship_length().max(2);
+
+        // Try active stride, and decrement down to 2 if current stride cells are exhausted
+        for s in (2..=max_len).rev() {
+            let target_rem = offset % s;
+            let s_cells: Vec<(usize, usize)> = unshot
+                .iter()
+                .copied()
+                .filter(|&(r, c)| (r + c) % s == target_rem)
+                .collect();
+            if !s_cells.is_empty() {
+                return *rng.choose(&s_cells).unwrap();
+            }
+        }
+
+        *rng.choose(&unshot).unwrap()
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                self.tracker.record_hit(pos);
+            }
+            ShotOutcome::Sunk(kind) => {
+                self.tracker.record_sunk(pos, kind, view);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
+/// Attack Strategy 8: Largest Rect + Stride (5 -> 4 -> 3 -> 2)
+/// - Hunt mode: Active stride s = max_remaining_ship_length. Find largest empty rectangle,
+///   and fire at the active-stride cell closest to the center of that rectangle.
+/// - Target mode: Smart collinear and orthogonal hunt-down.
+#[derive(Clone, Debug)]
+pub struct RectDescendingStrideAttack {
+    tracker: TargetTracker,
+    offset: Option<usize>,
+    mode: &'static str,
+}
+
+impl Default for RectDescendingStrideAttack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RectDescendingStrideAttack {
+    pub fn new() -> Self {
+        Self {
+            tracker: TargetTracker::new(),
+            offset: None,
+            mode: "rect_stride_5432",
+        }
+    }
+}
+
+impl AttackStrategy for RectDescendingStrideAttack {
+    fn name(&self) -> &'static str {
+        "Largest Rect + Stride (5->4->3->2)"
+    }
+
+    fn reset(&mut self) {
+        self.tracker.reset();
+        self.offset = None;
+        self.mode = "rect_stride_5432";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        let offset = *self.offset.get_or_insert_with(|| rng.next_usize(60));
+
+        if self.tracker.is_targeting() {
+            if let Some(target_pos) = self.tracker.choose_target_shot(view, rng) {
+                self.mode = "target";
+                return target_pos;
+            }
+            self.tracker.reset();
+        }
+
+        self.mode = "rect_stride_5432";
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let max_len = view.max_remaining_ship_length().max(2);
+
+        let mut stride_cells = Vec::new();
+        for s in (2..=max_len).rev() {
+            let target_rem = offset % s;
+            stride_cells = unshot
+                .iter()
+                .copied()
+                .filter(|&(r, c)| (r + c) % s == target_rem)
+                .collect();
+            if !stride_cells.is_empty() {
+                break;
+            }
+        }
+
+        let (_, _, best_rects) = find_largest_empty_rectangles(view);
+        if let Some(&(r0, r1, c0, c1)) = rng.choose(&best_rects) {
+            let mid_r = (r0 + r1) as f64 / 2.0;
+            let mid_c = (c0 + c1) as f64 / 2.0;
+
+            let inside_stride: Vec<(usize, usize)> = stride_cells
+                .iter()
+                .copied()
+                .filter(|&(r, c)| r >= r0 && r <= r1 && c >= c0 && c <= c1)
+                .collect();
+
+            let candidate_pool = if !inside_stride.is_empty() {
+                inside_stride
+            } else if !stride_cells.is_empty() {
+                stride_cells.clone()
+            } else {
+                let rect_mid = ((r0 + r1) / 2, (c0 + c1) / 2);
+                if view.is_unshot(rect_mid.0, rect_mid.1) {
+                    vec![rect_mid]
+                } else {
+                    unshot.clone()
+                }
+            };
+
+            let mut min_d2 = f64::INFINITY;
+            let mut best_picks = Vec::new();
+            for &(r, c) in &candidate_pool {
+                let d2 = (r as f64 - mid_r).powi(2) + (c as f64 - mid_c).powi(2);
+                if (d2 - min_d2).abs() < 1e-9 {
+                    best_picks.push((r, c));
+                } else if d2 < min_d2 {
+                    min_d2 = d2;
+                    best_picks.clear();
+                    best_picks.push((r, c));
+                }
+            }
+
+            if let Some(&chosen) = rng.choose(&best_picks) {
+                return chosen;
+            }
+        }
+
+        if !stride_cells.is_empty() {
+            return *rng.choose(&stride_cells).unwrap();
+        }
+
+        *rng.choose(&unshot).unwrap()
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                self.tracker.record_hit(pos);
+            }
+            ShotOutcome::Sunk(kind) => {
+                self.tracker.record_sunk(pos, kind, view);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
+/// Attack Strategy 9: Largest Rect + Checkerboard
+/// - Hunt mode: Parity stride 2. Finds the largest empty rectangle, and selects the unshot
+///   checkerboard cell closest to the center of that rectangle.
+/// - Target mode: Smart collinear and orthogonal hunt-down.
+#[derive(Clone, Debug)]
+pub struct RectCheckerboardAttack {
+    tracker: TargetTracker,
+    parity: Option<usize>,
+    mode: &'static str,
+}
+
+impl Default for RectCheckerboardAttack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RectCheckerboardAttack {
+    pub fn new() -> Self {
+        Self {
+            tracker: TargetTracker::new(),
+            parity: None,
+            mode: "rect_checkerboard",
+        }
+    }
+}
+
+impl AttackStrategy for RectCheckerboardAttack {
+    fn name(&self) -> &'static str {
+        "Largest Rect + Checkerboard"
+    }
+
+    fn reset(&mut self) {
+        self.tracker.reset();
+        self.parity = None;
+        self.mode = "rect_checkerboard";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        let parity = *self.parity.get_or_insert_with(|| rng.next_usize(2));
+
+        if self.tracker.is_targeting() {
+            if let Some(target_pos) = self.tracker.choose_target_shot(view, rng) {
+                self.mode = "target";
+                return target_pos;
+            }
+            self.tracker.reset();
+        }
+
+        self.mode = "rect_checkerboard";
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let parity_cells: Vec<(usize, usize)> = unshot
+            .iter()
+            .copied()
+            .filter(|&(r, c)| (r + c) % 2 == parity)
+            .collect();
+
+        let (_, _, best_rects) = find_largest_empty_rectangles(view);
+        if let Some(&(r0, r1, c0, c1)) = rng.choose(&best_rects) {
+            let mid_r = (r0 + r1) as f64 / 2.0;
+            let mid_c = (c0 + c1) as f64 / 2.0;
+
+            let inside_parity: Vec<(usize, usize)> = parity_cells
+                .iter()
+                .copied()
+                .filter(|&(r, c)| r >= r0 && r <= r1 && c >= c0 && c <= c1)
+                .collect();
+
+            let candidate_pool = if !inside_parity.is_empty() {
+                inside_parity
+            } else if !parity_cells.is_empty() {
+                parity_cells.clone()
+            } else {
+                let rect_mid = ((r0 + r1) / 2, (c0 + c1) / 2);
+                if view.is_unshot(rect_mid.0, rect_mid.1) {
+                    vec![rect_mid]
+                } else {
+                    unshot.clone()
+                }
+            };
+
+            let mut min_d2 = f64::INFINITY;
+            let mut best_picks = Vec::new();
+            for &(r, c) in &candidate_pool {
+                let d2 = (r as f64 - mid_r).powi(2) + (c as f64 - mid_c).powi(2);
+                if (d2 - min_d2).abs() < 1e-9 {
+                    best_picks.push((r, c));
+                } else if d2 < min_d2 {
+                    min_d2 = d2;
+                    best_picks.clear();
+                    best_picks.push((r, c));
+                }
+            }
+
+            if let Some(&chosen) = rng.choose(&best_picks) {
+                return chosen;
+            }
+        }
+
+        if !parity_cells.is_empty() {
+            return *rng.choose(&parity_cells).unwrap();
+        }
+
+        *rng.choose(&unshot).unwrap()
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                self.tracker.record_hit(pos);
+            }
+            ShotOutcome::Sunk(kind) => {
+                self.tracker.record_sunk(pos, kind, view);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
+/// Attack Strategy 10: Monte Carlo Sampling
+/// - Simulates random valid fleet configurations consistent with observed Miss/Sunk/Hit cells.
+/// - Prioritizes valid configurations covering any active unsunk hits.
+/// - Accumulates frequency count across unshot cells and fires at the highest frequency cell.
+#[derive(Clone, Debug, Default)]
+pub struct MonteCarloAttack {
+    tracker: TargetTracker,
+    mode: &'static str,
+}
+
+impl MonteCarloAttack {
+    pub fn new() -> Self {
+        Self {
+            tracker: TargetTracker::new(),
+            mode: "monte_carlo",
+        }
+    }
+}
+
+impl AttackStrategy for MonteCarloAttack {
+    fn name(&self) -> &'static str {
+        "Monte Carlo Sampling"
+    }
+
+    fn reset(&mut self) {
+        self.tracker.reset();
+        self.mode = "monte_carlo";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        if self.tracker.is_targeting() {
+            self.mode = "target";
+        } else {
+            self.mode = "monte_carlo";
+        }
+
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let remaining = view.remaining_unsunk_ships();
+        if remaining.is_empty() {
+            return *rng.choose(&unshot).unwrap();
+        }
+
+        let active_hits = &self.tracker.active_hits;
+        let mut freq = [[0u32; WIDTH]; HEIGHT];
+        let target_samples = 100usize;
+        let max_attempts = 250usize;
+        let mut successful_samples = 0usize;
+
+        struct CandPlacement {
+            r: usize,
+            c: usize,
+            is_horiz: bool,
+            len: usize,
+            covers_active_hit: bool,
+        }
+
+        let mut ship_cands: Vec<Vec<CandPlacement>> = Vec::with_capacity(remaining.len());
+        for &kind in &remaining {
+            let len = kind.length();
+            let mut list = Vec::new();
+
+            // Horizontal
+            for r in 0..HEIGHT {
+                for c in 0..=(WIDTH - len) {
+                    let mut valid = true;
+                    let mut covers = false;
+                    for dc in 0..len {
+                        let cell = view.cell(r, c + dc);
+                        if matches!(cell, TrackingCell::Miss | TrackingCell::Sunk(_)) {
+                            valid = false;
+                            break;
+                        }
+                        if active_hits.contains(&(r, c + dc)) {
+                            covers = true;
+                        }
+                    }
+                    if valid {
+                        list.push(CandPlacement {
+                            r,
+                            c,
+                            is_horiz: true,
+                            len,
+                            covers_active_hit: covers,
+                        });
+                    }
+                }
+            }
+
+            // Vertical
+            for c in 0..WIDTH {
+                for r in 0..=(HEIGHT - len) {
+                    let mut valid = true;
+                    let mut covers = false;
+                    for dr in 0..len {
+                        let cell = view.cell(r + dr, c);
+                        if matches!(cell, TrackingCell::Miss | TrackingCell::Sunk(_)) {
+                            valid = false;
+                            break;
+                        }
+                        if active_hits.contains(&(r + dr, c)) {
+                            covers = true;
+                        }
+                    }
+                    if valid {
+                        list.push(CandPlacement {
+                            r,
+                            c,
+                            is_horiz: false,
+                            len,
+                            covers_active_hit: covers,
+                        });
+                    }
+                }
+            }
+
+            ship_cands.push(list);
+        }
+
+        for _ in 0..max_attempts {
+            if successful_samples >= target_samples {
+                break;
+            }
+
+            let mut occupied = [[false; WIDTH]; HEIGHT];
+            let mut active_hits_covered = 0usize;
+            let mut sample_success = true;
+
+            for cands in &ship_cands {
+                if cands.is_empty() {
+                    sample_success = false;
+                    break;
+                }
+
+                let valid_for_this_sample: Vec<&CandPlacement> = if !active_hits.is_empty()
+                    && active_hits_covered < active_hits.len()
+                {
+                    let hit_covering: Vec<&CandPlacement> = cands
+                        .iter()
+                        .filter(|cand| {
+                            cand.covers_active_hit && {
+                                let mut fits = true;
+                                if cand.is_horiz {
+                                    for dc in 0..cand.len {
+                                        if occupied[cand.r][cand.c + dc] {
+                                            fits = false;
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    for dr in 0..cand.len {
+                                        if occupied[cand.r + dr][cand.c] {
+                                            fits = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                fits
+                            }
+                        })
+                        .collect();
+
+                    if !hit_covering.is_empty() {
+                        hit_covering
+                    } else {
+                        cands
+                            .iter()
+                            .filter(|cand| {
+                                let mut fits = true;
+                                if cand.is_horiz {
+                                    for dc in 0..cand.len {
+                                        if occupied[cand.r][cand.c + dc] {
+                                            fits = false;
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    for dr in 0..cand.len {
+                                        if occupied[cand.r + dr][cand.c] {
+                                            fits = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                fits
+                            })
+                            .collect()
+                    }
+                } else {
+                    cands
+                        .iter()
+                        .filter(|cand| {
+                            let mut fits = true;
+                            if cand.is_horiz {
+                                for dc in 0..cand.len {
+                                    if occupied[cand.r][cand.c + dc] {
+                                        fits = false;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                for dr in 0..cand.len {
+                                    if occupied[cand.r + dr][cand.c] {
+                                        fits = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            fits
+                        })
+                        .collect()
+                };
+
+                if valid_for_this_sample.is_empty() {
+                    sample_success = false;
+                    break;
+                }
+
+                let chosen = rng.choose(&valid_for_this_sample).unwrap();
+                if chosen.is_horiz {
+                    for dc in 0..chosen.len {
+                        let row = chosen.r;
+                        let col = chosen.c + dc;
+                        occupied[row][col] = true;
+                        if active_hits.contains(&(row, col)) {
+                            active_hits_covered += 1;
+                        }
+                    }
+                } else {
+                    for dr in 0..chosen.len {
+                        let row = chosen.r + dr;
+                        let col = chosen.c;
+                        occupied[row][col] = true;
+                        if active_hits.contains(&(row, col)) {
+                            active_hits_covered += 1;
+                        }
+                    }
+                }
+            }
+
+            if sample_success && (active_hits.is_empty() || active_hits_covered >= active_hits.len()) {
+                successful_samples += 1;
+                for &(r, c) in &unshot {
+                    if occupied[r][c] {
+                        freq[r][c] += 1;
+                    }
+                }
+            }
+        }
+
+        if successful_samples > 0 {
+            let mut max_count = 0u32;
+            let mut best_cells = Vec::new();
+            for &(r, c) in &unshot {
+                let count = freq[r][c];
+                if count > max_count {
+                    max_count = count;
+                    best_cells.clear();
+                    best_cells.push((r, c));
+                } else if count == max_count && max_count > 0 {
+                    best_cells.push((r, c));
+                }
+            }
+
+            if !best_cells.is_empty() {
+                return *rng.choose(&best_cells).unwrap();
+            }
+        }
+
+        if self.tracker.is_targeting() {
+            if let Some(pos) = self.tracker.choose_target_shot(view, rng) {
+                return pos;
+            }
+        }
+
+        *rng.choose(&unshot).unwrap()
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                self.tracker.record_hit(pos);
+            }
+            ShotOutcome::Sunk(kind) => {
+                self.tracker.record_sunk(pos, kind, view);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
+/// Helper computing the analytical Bayesian cell density across all valid remaining ship placements.
+/// Placements covering H active hits get weight 1000^H, while placements covering 0 active hits get weight 1.
+pub fn compute_bayesian_density(
+    view: &TrackingBoard,
+    active_hits: &[(usize, usize)],
+) -> [[u64; WIDTH]; HEIGHT] {
+    let mut grid = [[0u64; WIDTH]; HEIGHT];
+    let remaining = view.remaining_unsunk_ships();
+    let has_active_hits = !active_hits.is_empty();
+
+    for &kind in &remaining {
+        let len = kind.length();
+
+        // Horizontal placements: (r, c..c+len)
+        for r in 0..HEIGHT {
+            for c in 0..=(WIDTH - len) {
+                let mut valid = true;
+                let mut h_count = 0u32;
+                for dc in 0..len {
+                    let col = c + dc;
+                    let cell = view.cell(r, col);
+                    if matches!(cell, TrackingCell::Miss | TrackingCell::Sunk(_)) {
+                        valid = false;
+                        break;
+                    }
+                    if active_hits.contains(&(r, col)) {
+                        h_count += 1;
+                    }
+                }
+                if valid {
+                    let weight = if has_active_hits {
+                        if h_count > 0 {
+                            1_000u64.saturating_pow(h_count)
+                        } else {
+                            1u64
+                        }
+                    } else {
+                        1u64
+                    };
+
+                    for dc in 0..len {
+                        let col = c + dc;
+                        if view.is_unshot(r, col) {
+                            grid[r][col] = grid[r][col].saturating_add(weight);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Vertical placements: (r..r+len, c)
+        for c in 0..WIDTH {
+            for r in 0..=(HEIGHT - len) {
+                let mut valid = true;
+                let mut h_count = 0u32;
+                for dr in 0..len {
+                    let row = r + dr;
+                    let cell = view.cell(row, c);
+                    if matches!(cell, TrackingCell::Miss | TrackingCell::Sunk(_)) {
+                        valid = false;
+                        break;
+                    }
+                    if active_hits.contains(&(row, c)) {
+                        h_count += 1;
+                    }
+                }
+                if valid {
+                    let weight = if has_active_hits {
+                        if h_count > 0 {
+                            1_000u64.saturating_pow(h_count)
+                        } else {
+                            1u64
+                        }
+                    } else {
+                        1u64
+                    };
+
+                    for dr in 0..len {
+                        let row = r + dr;
+                        if view.is_unshot(row, c) {
+                            grid[row][c] = grid[row][c].saturating_add(weight);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    grid
+}
+
+/// Attack Strategy 11: Bayesian Probability Density
+/// - Computes the exact combinatorial probability density of all remaining unsunk ships.
+/// - In Target mode, placements covering active hits receive exponential likelihood weight (1000^H).
+/// - Collinear extensions naturally dominate orthogonal probes without hardcoded heuristics.
+#[derive(Clone, Debug, Default)]
+pub struct BayesianPdfAttack {
+    tracker: TargetTracker,
+    mode: &'static str,
+}
+
+impl BayesianPdfAttack {
+    pub fn new() -> Self {
+        Self {
+            tracker: TargetTracker::new(),
+            mode: "bayesian_pdf",
+        }
+    }
+}
+
+impl AttackStrategy for BayesianPdfAttack {
+    fn name(&self) -> &'static str {
+        "Bayesian Probability Density"
+    }
+
+    fn reset(&mut self) {
+        self.tracker.reset();
+        self.mode = "bayesian_pdf";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        if self.tracker.is_targeting() {
+            self.mode = "target";
+        } else {
+            self.mode = "bayesian_pdf";
+        }
+
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let density = compute_bayesian_density(view, &self.tracker.active_hits);
+
+        let mut max_val = 0u64;
+        let mut best_cells = Vec::new();
+        for &(r, c) in &unshot {
+            let val = density[r][c];
+            if val > max_val {
+                max_val = val;
+                best_cells.clear();
+                best_cells.push((r, c));
+            } else if val == max_val && max_val > 0 {
+                best_cells.push((r, c));
+            }
+        }
+
+        if !best_cells.is_empty() {
+            return *rng.choose(&best_cells).unwrap();
+        }
+
+        if self.tracker.is_targeting() {
+            if let Some(pos) = self.tracker.choose_target_shot(view, rng) {
+                return pos;
+            }
+        }
+
+        *rng.choose(&unshot).unwrap()
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                self.tracker.record_hit(pos);
+            }
+            ShotOutcome::Sunk(kind) => {
+                self.tracker.record_sunk(pos, kind, view);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1150,5 +1969,139 @@ mod tests {
 
         assert!(board.all_sunk());
         assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_descending_stride_single_game() {
+        let mut rng = Rng::with_seed(707);
+        let mut defense = RandomDefense::new();
+        let mut attack = DescendingStrideAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_rect_descending_stride_single_game() {
+        let mut rng = Rng::with_seed(808);
+        let mut defense = RandomDefense::new();
+        let mut attack = RectDescendingStrideAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_rect_checkerboard_single_game() {
+        let mut rng = Rng::with_seed(909);
+        let mut defense = RandomDefense::new();
+        let mut attack = RectCheckerboardAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_monte_carlo_single_game() {
+        let mut rng = Rng::with_seed(1010);
+        let mut defense = RandomDefense::new();
+        let mut attack = MonteCarloAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_bayesian_pdf_single_game() {
+        let mut rng = Rng::with_seed(1111);
+        let mut defense = RandomDefense::new();
+        let mut attack = BayesianPdfAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_bayesian_density_prioritizes_collinear_hits() {
+        let mut view = TrackingBoard::new();
+        let active_hits = vec![(4, 4), (4, 5)];
+        view.record_shot(4, 4, ShotOutcome::Hit);
+        view.record_shot(4, 5, ShotOutcome::Hit);
+
+        let density = compute_bayesian_density(&view, &active_hits);
+
+        assert!(density[4][3] >= 1_000_000, "Expected collinear (4,3) to have >= 1M density, got {}", density[4][3]);
+        assert!(density[4][6] >= 1_000_000, "Expected collinear (4,6) to have >= 1M density, got {}", density[4][6]);
+        assert!(density[4][3] > density[3][4] * 100, "Collinear must dominate orthogonal probe");
     }
 }
