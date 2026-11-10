@@ -23,16 +23,71 @@ pub trait DefenseStrategy {
 
 /// Attack strategy trait.
 pub trait AttackStrategy {
+    /// Clone strategy into a Box trait object.
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        unimplemented!("clone_box not implemented for this strategy")
+    }
     /// Strategy name.
     fn name(&self) -> &'static str;
     /// Reset internal state before a new game begins.
     fn reset(&mut self);
     /// Choose the coordinate (row, col) for the next shot.
     fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize);
+    /// Choose multiple coordinates for a Salvo volley using virtual-miss hallucination planning.
+    fn choose_salvo(
+        &mut self,
+        view: &TrackingBoard,
+        count: usize,
+        rng: &mut Rng,
+    ) -> Vec<(usize, usize)> {
+        let unshot = view.unshot_cells();
+        let k = count.min(unshot.len());
+        if k == 0 {
+            return Vec::new();
+        }
+        if k == 1 {
+            return vec![self.choose_shot(view, rng)];
+        }
+
+        // k > 1 (Virtual-Miss Hallucination / Constant-Liar Batch Planning)
+        let first = self.choose_shot(view, rng);
+        let mut shots = Vec::with_capacity(k);
+        shots.push(first);
+
+        let mut planner = self.clone_box();
+        let mut virtual_view = view.clone();
+        virtual_view.record_shot(first.0, first.1, ShotOutcome::Miss);
+        planner.on_shot_result(first, ShotOutcome::Miss, &virtual_view);
+
+        for _ in 1..k {
+            let mut next = planner.choose_shot(&virtual_view, rng);
+            if shots.contains(&next) || !virtual_view.is_unshot(next.0, next.1) {
+                let avail: Vec<(usize, usize)> = virtual_view
+                    .unshot_cells()
+                    .into_iter()
+                    .filter(|c| !shots.contains(c))
+                    .collect();
+                if let Some(&fb) = rng.choose(&avail) {
+                    next = fb;
+                }
+            }
+            shots.push(next);
+            virtual_view.record_shot(next.0, next.1, ShotOutcome::Miss);
+            planner.on_shot_result(next, ShotOutcome::Miss, &virtual_view);
+        }
+
+        shots
+    }
     /// Notify strategy of the result of the shot just fired at pos.
     fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, view: &TrackingBoard);
     /// Current strategy mode string ("hunt", "checkerboard", "target").
     fn current_mode(&self) -> &'static str;
+}
+
+impl Clone for Box<dyn AttackStrategy> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 /// Helper function to generate a valid random 5-ship fleet.
@@ -1005,7 +1060,7 @@ impl TargetTracker {
     }
 
     /// Choose the next target mode shot:
-    /// 1. Prioritize collinear endpoints if 2+ collinear active hits exist.
+    /// 1. Prioritize collinear endpoints or 1-cell bridges if 2+ collinear active hits exist.
     /// 2. Fall back to orthogonal neighbors of active hits.
     /// 3. Returns None if all neighbors of active hits are already shot.
     pub fn choose_target_shot(
@@ -1013,64 +1068,102 @@ impl TargetTracker {
         view: &TrackingBoard,
         rng: &mut Rng,
     ) -> Option<(usize, usize)> {
-        if self.active_hits.is_empty() {
+        let active_hits = if view.ruleset().is_silent_sinking() {
+            view.silent_unexplained_hits()
+        } else {
+            self.active_hits.clone()
+        };
+
+        if active_hits.is_empty() {
             return None;
         }
 
-        // 1. Check for collinear chains (length >= 2 in active hits)
+        // 1. Check for collinear chains (contiguous runs >= 2) and 1-cell bridges
         let mut collinear_candidates = Vec::new();
 
-        // Horizontal collinear chains
+        // Horizontal collinear chains and bridges
         for r in 0..HEIGHT {
-            let mut cols: Vec<usize> = self
-                .active_hits
+            let mut cols: Vec<usize> = active_hits
                 .iter()
                 .filter(|(hr, _)| *hr == r)
                 .map(|(_, hc)| *hc)
                 .collect();
             if cols.len() >= 2 {
                 cols.sort_unstable();
-                // Check contiguous chains or connected hits
-                let min_c = cols[0];
-                let max_c = cols[cols.len() - 1];
 
-                // Immediate left endpoint
-                if min_c > 0 && view.is_unshot(r, min_c - 1) {
-                    collinear_candidates.push((r, min_c - 1));
+                // Check for 1-cell collinear bridges
+                for i in 0..(cols.len() - 1) {
+                    if cols[i + 1] == cols[i] + 2 && view.is_unshot(r, cols[i] + 1) {
+                        collinear_candidates.push((r, cols[i] + 1));
+                    }
                 }
-                // Immediate right endpoint
-                if max_c + 1 < WIDTH && view.is_unshot(r, max_c + 1) {
-                    collinear_candidates.push((r, max_c + 1));
+
+                // Check for maximal contiguous runs of length >= 2
+                let mut i = 0;
+                while i < cols.len() {
+                    let start = cols[i];
+                    while i + 1 < cols.len() && cols[i + 1] == cols[i] + 1 {
+                        i += 1;
+                    }
+                    let end = cols[i];
+                    let len = end - start + 1;
+                    if len >= 2 {
+                        // Immediate left endpoint
+                        if start > 0 && view.is_unshot(r, start - 1) {
+                            collinear_candidates.push((r, start - 1));
+                        }
+                        // Immediate right endpoint
+                        if end + 1 < WIDTH && view.is_unshot(r, end + 1) {
+                            collinear_candidates.push((r, end + 1));
+                        }
+                    }
+                    i += 1;
                 }
             }
         }
 
-        // Vertical collinear chains
+        // Vertical collinear chains and bridges
         for c in 0..WIDTH {
-            let mut rows: Vec<usize> = self
-                .active_hits
+            let mut rows: Vec<usize> = active_hits
                 .iter()
                 .filter(|(_, hc)| *hc == c)
                 .map(|(hr, _)| *hr)
                 .collect();
             if rows.len() >= 2 {
                 rows.sort_unstable();
-                let min_r = rows[0];
-                let max_r = rows[rows.len() - 1];
 
-                // Immediate top endpoint
-                if min_r > 0 && view.is_unshot(min_r - 1, c) {
-                    collinear_candidates.push((min_r - 1, c));
+                // Check for 1-cell collinear bridges
+                for i in 0..(rows.len() - 1) {
+                    if rows[i + 1] == rows[i] + 2 && view.is_unshot(rows[i] + 1, c) {
+                        collinear_candidates.push((rows[i] + 1, c));
+                    }
                 }
-                // Immediate bottom endpoint
-                if max_r + 1 < HEIGHT && view.is_unshot(max_r + 1, c) {
-                    collinear_candidates.push((max_r + 1, c));
+
+                // Check for maximal contiguous runs of length >= 2
+                let mut i = 0;
+                while i < rows.len() {
+                    let start = rows[i];
+                    while i + 1 < rows.len() && rows[i + 1] == rows[i] + 1 {
+                        i += 1;
+                    }
+                    let end = rows[i];
+                    let len = end - start + 1;
+                    if len >= 2 {
+                        // Immediate top endpoint
+                        if start > 0 && view.is_unshot(start - 1, c) {
+                            collinear_candidates.push((start - 1, c));
+                        }
+                        // Immediate bottom endpoint
+                        if end + 1 < HEIGHT && view.is_unshot(end + 1, c) {
+                            collinear_candidates.push((end + 1, c));
+                        }
+                    }
+                    i += 1;
                 }
             }
         }
 
         if !collinear_candidates.is_empty() {
-            // Deduplicate
             collinear_candidates.sort_unstable();
             collinear_candidates.dedup();
             return rng.choose(&collinear_candidates).copied();
@@ -1078,7 +1171,7 @@ impl TargetTracker {
 
         // 2. Fall back to orthogonal neighbors (N, S, E, W) of any active hit
         let mut neighbor_candidates = Vec::new();
-        for &(r, c) in &self.active_hits {
+        for &(r, c) in &active_hits {
             if r > 0 && view.is_unshot(r - 1, c) {
                 neighbor_candidates.push((r - 1, c));
             }
@@ -1123,6 +1216,10 @@ impl HuntAndTargetAttack {
 }
 
 impl AttackStrategy for HuntAndTargetAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Random + Hunt/Target"
     }
@@ -1143,6 +1240,9 @@ impl AttackStrategy for HuntAndTargetAttack {
         }
 
         self.mode = "hunt";
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
+        }
         let unshot = view.unshot_cells();
         assert!(!unshot.is_empty(), "No unshot cells remaining on board");
         *rng.choose(&unshot).unwrap()
@@ -1194,6 +1294,10 @@ impl CheckerboardAttack {
 }
 
 impl AttackStrategy for CheckerboardAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Checkerboard + Hunt/Target"
     }
@@ -1230,6 +1334,9 @@ impl AttackStrategy for CheckerboardAttack {
         if !parity_unshot.is_empty() {
             *rng.choose(&parity_unshot).unwrap()
         } else {
+            if let Some(pos) = silent_endgame_fallback(view, rng) {
+                return pos;
+            }
             // Parity cells exhausted, fall back to any unshot cell
             *rng.choose(&unshot).unwrap()
         }
@@ -1326,6 +1433,10 @@ impl LargestRectMidpointAttack {
 }
 
 impl AttackStrategy for LargestRectMidpointAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Largest Empty Rect Midpoint"
     }
@@ -1353,6 +1464,10 @@ impl AttackStrategy for LargestRectMidpointAttack {
             if view.is_unshot(mid_r, mid_c) {
                 return (mid_r, mid_c);
             }
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
         }
 
         let unshot = view.unshot_cells();
@@ -1405,6 +1520,10 @@ impl AdaptiveStrideUpAttack {
 }
 
 impl AttackStrategy for AdaptiveStrideUpAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Adaptive Stride (2->3->4->5)"
     }
@@ -1452,6 +1571,10 @@ impl AttackStrategy for AdaptiveStrideUpAttack {
 
         if !fit_cells.is_empty() {
             return *rng.choose(&fit_cells).unwrap();
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
         }
 
         *rng.choose(&unshot).unwrap()
@@ -1503,6 +1626,10 @@ impl StaggeredFourToTwoAttack {
 }
 
 impl AttackStrategy for StaggeredFourToTwoAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Staggered Stride (4->2)"
     }
@@ -1554,6 +1681,10 @@ impl AttackStrategy for StaggeredFourToTwoAttack {
             return *rng.choose(&parity_cells).unwrap();
         }
 
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
+        }
+
         *rng.choose(&unshot).unwrap()
     }
 
@@ -1603,6 +1734,10 @@ impl RectStrideFourAttack {
 }
 
 impl AttackStrategy for RectStrideFourAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Largest Rect + Stride (4->2)"
     }
@@ -1699,6 +1834,10 @@ impl AttackStrategy for RectStrideFourAttack {
             return *rng.choose(&stride_cells).unwrap();
         }
 
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
+        }
+
         *rng.choose(&unshot).unwrap()
     }
 
@@ -1748,6 +1887,10 @@ impl DescendingStrideAttack {
 }
 
 impl AttackStrategy for DescendingStrideAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Descending Stride (5->4->3->2)"
     }
@@ -1786,6 +1929,10 @@ impl AttackStrategy for DescendingStrideAttack {
             if !s_cells.is_empty() {
                 return *rng.choose(&s_cells).unwrap();
             }
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
         }
 
         *rng.choose(&unshot).unwrap()
@@ -1836,6 +1983,10 @@ impl RectDescendingStrideAttack {
 }
 
 impl AttackStrategy for RectDescendingStrideAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Largest Rect + Stride (5->4->3->2)"
     }
@@ -1922,6 +2073,10 @@ impl AttackStrategy for RectDescendingStrideAttack {
             return *rng.choose(&stride_cells).unwrap();
         }
 
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
+        }
+
         *rng.choose(&unshot).unwrap()
     }
 
@@ -1970,6 +2125,10 @@ impl RectCheckerboardAttack {
 }
 
 impl AttackStrategy for RectCheckerboardAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Largest Rect + Checkerboard"
     }
@@ -2047,6 +2206,10 @@ impl AttackStrategy for RectCheckerboardAttack {
             return *rng.choose(&parity_cells).unwrap();
         }
 
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
+        }
+
         *rng.choose(&unshot).unwrap()
     }
 
@@ -2087,6 +2250,10 @@ impl MonteCarloAttack {
 }
 
 impl AttackStrategy for MonteCarloAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Monte Carlo Sampling"
     }
@@ -2106,12 +2273,26 @@ impl AttackStrategy for MonteCarloAttack {
         let unshot = view.unshot_cells();
         assert!(!unshot.is_empty(), "No unshot cells remaining on board");
 
-        let remaining = view.remaining_unsunk_ships();
+        let is_silent = view.ruleset().is_silent_sinking();
+        let remaining = if is_silent {
+            view.effective_remaining_ships()
+        } else {
+            view.remaining_unsunk_ships()
+        };
         if remaining.is_empty() {
+            if let Some(pos) = silent_endgame_fallback(view, rng) {
+                return pos;
+            }
             return *rng.choose(&unshot).unwrap();
         }
 
-        let active_hits = &self.tracker.active_hits;
+        let silent_hits_holder;
+        let active_hits: &[(usize, usize)] = if is_silent {
+            silent_hits_holder = view.silent_unexplained_hits();
+            &silent_hits_holder[..]
+        } else {
+            &self.tracker.active_hits[..]
+        };
         let mut freq = [[0u32; WIDTH]; HEIGHT];
         let target_samples = 100usize;
         let max_attempts = 250usize;
@@ -2343,6 +2524,28 @@ impl AttackStrategy for MonteCarloAttack {
             }
         }
 
+        // Analytical Bayesian density fallback if MC sampling produced 0 valid full-board samples
+        let density = compute_bayesian_density(view, &self.tracker.active_hits);
+        let mut max_d = 0u64;
+        let mut best_density_cells = Vec::new();
+        for &(r, c) in &unshot {
+            let d = density[r][c];
+            if d > max_d {
+                max_d = d;
+                best_density_cells.clear();
+                best_density_cells.push((r, c));
+            } else if d == max_d && max_d > 0 {
+                best_density_cells.push((r, c));
+            }
+        }
+        if !best_density_cells.is_empty() {
+            return *rng.choose(&best_density_cells).unwrap();
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
+        }
+
         *rng.choose(&unshot).unwrap()
     }
 
@@ -2369,85 +2572,126 @@ pub fn compute_bayesian_density(
     view: &TrackingBoard,
     active_hits: &[(usize, usize)],
 ) -> [[u64; WIDTH]; HEIGHT] {
-    let mut grid = [[0u64; WIDTH]; HEIGHT];
-    let remaining = view.remaining_unsunk_ships();
-    let has_active_hits = !active_hits.is_empty();
+    let is_silent = view.ruleset().is_silent_sinking();
+    let remaining = if is_silent {
+        view.effective_remaining_ships()
+    } else {
+        view.remaining_unsunk_ships()
+    };
 
-    for &kind in &remaining {
-        let len = kind.length();
+    let silent_hits_holder;
+    let unexplained = if is_silent {
+        silent_hits_holder = view.silent_unexplained_hits();
+        &silent_hits_holder[..]
+    } else {
+        active_hits
+    };
 
-        // Horizontal placements: (r, c..c+len)
-        for r in 0..HEIGHT {
-            for c in 0..=(WIDTH - len) {
-                let mut valid = true;
-                let mut h_count = 0u32;
-                for dc in 0..len {
-                    let col = c + dc;
-                    let cell = view.cell(r, col);
-                    if matches!(cell, TrackingCell::Miss | TrackingCell::Sunk(_)) {
-                        valid = false;
-                        break;
-                    }
-                    if active_hits.contains(&(r, col)) {
-                        h_count += 1;
-                    }
-                }
-                if valid {
-                    let weight = if has_active_hits {
-                        if h_count > 0 {
-                            1_000u64.saturating_pow(h_count)
-                        } else {
-                            1u64
-                        }
-                    } else {
-                        1u64
-                    };
+    let compute_grid = |allow_all_hits: bool| -> [[u64; WIDTH]; HEIGHT] {
+        let mut grid = [[0u64; WIDTH]; HEIGHT];
+        let has_active_hits = !unexplained.is_empty();
 
+        for &kind in &remaining {
+            let len = kind.length();
+
+            // Horizontal placements: (r, c..c+len)
+            for r in 0..HEIGHT {
+                for c in 0..=(WIDTH - len) {
+                    let mut valid = true;
+                    let mut h_count = 0u32;
                     for dc in 0..len {
                         let col = c + dc;
-                        if view.is_unshot(r, col) {
-                            grid[r][col] = grid[r][col].saturating_add(weight);
+                        let cell = view.cell(r, col);
+                        if cell == TrackingCell::Miss || cell.is_sunk() {
+                            valid = false;
+                            break;
+                        }
+                        if cell == TrackingCell::Hit {
+                            if is_silent && !allow_all_hits && !unexplained.contains(&(r, col)) {
+                                valid = false;
+                                break;
+                            }
+                            if unexplained.contains(&(r, col)) || allow_all_hits {
+                                h_count += 1;
+                            }
+                        }
+                    }
+                    if valid {
+                        let weight = if has_active_hits || allow_all_hits {
+                            if h_count > 0 {
+                                1_000u64.saturating_pow(h_count)
+                            } else {
+                                1u64
+                            }
+                        } else {
+                            1u64
+                        };
+
+                        for dc in 0..len {
+                            let col = c + dc;
+                            if view.is_unshot(r, col) {
+                                grid[r][col] = grid[r][col].saturating_add(weight);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Vertical placements: (r..r+len, c)
+            for c in 0..WIDTH {
+                for r in 0..=(HEIGHT - len) {
+                    let mut valid = true;
+                    let mut h_count = 0u32;
+                    for dr in 0..len {
+                        let row = r + dr;
+                        let cell = view.cell(row, c);
+                        if cell == TrackingCell::Miss || cell.is_sunk() {
+                            valid = false;
+                            break;
+                        }
+                        if cell == TrackingCell::Hit {
+                            if is_silent && !allow_all_hits && !unexplained.contains(&(row, c)) {
+                                valid = false;
+                                break;
+                            }
+                            if unexplained.contains(&(row, c)) || allow_all_hits {
+                                h_count += 1;
+                            }
+                        }
+                    }
+                    if valid {
+                        let weight = if has_active_hits || allow_all_hits {
+                            if h_count > 0 {
+                                1_000u64.saturating_pow(h_count)
+                            } else {
+                                1u64
+                            }
+                        } else {
+                            1u64
+                        };
+
+                        for dr in 0..len {
+                            let row = r + dr;
+                            if view.is_unshot(row, c) {
+                                grid[row][c] = grid[row][c].saturating_add(weight);
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Vertical placements: (r..r+len, c)
-        for c in 0..WIDTH {
-            for r in 0..=(HEIGHT - len) {
-                let mut valid = true;
-                let mut h_count = 0u32;
-                for dr in 0..len {
-                    let row = r + dr;
-                    let cell = view.cell(row, c);
-                    if matches!(cell, TrackingCell::Miss | TrackingCell::Sunk(_)) {
-                        valid = false;
-                        break;
-                    }
-                    if active_hits.contains(&(row, c)) {
-                        h_count += 1;
-                    }
-                }
-                if valid {
-                    let weight = if has_active_hits {
-                        if h_count > 0 {
-                            1_000u64.saturating_pow(h_count)
-                        } else {
-                            1u64
-                        }
-                    } else {
-                        1u64
-                    };
+        grid
+    };
 
-                    for dr in 0..len {
-                        let row = r + dr;
-                        if view.is_unshot(row, c) {
-                            grid[row][c] = grid[row][c].saturating_add(weight);
-                        }
-                    }
-                }
-            }
+    let grid = compute_grid(false);
+
+    if is_silent {
+        let unshot = view.unshot_cells();
+        let max_val = unshot.iter().map(|&(r, c)| grid[r][c]).max().unwrap_or(0);
+        if max_val == 0 {
+            // Recompute allowing placements over all Hit cells
+            return compute_grid(true);
         }
     }
 
@@ -2474,6 +2718,10 @@ impl BayesianPdfAttack {
 }
 
 impl AttackStrategy for BayesianPdfAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Bayesian Probability Density"
     }
@@ -2516,6 +2764,10 @@ impl AttackStrategy for BayesianPdfAttack {
             if let Some(pos) = self.tracker.choose_target_shot(view, rng) {
                 return pos;
             }
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
         }
 
         *rng.choose(&unshot).unwrap()
@@ -2599,20 +2851,38 @@ pub fn choose_open_side_target(
     view: &TrackingBoard,
     rng: &mut Rng,
 ) -> Option<(usize, usize)> {
-    if active_hits.is_empty() {
+    let silent_hits_holder;
+    let hits = if view.ruleset().is_silent_sinking() {
+        silent_hits_holder = view.silent_unexplained_hits();
+        &silent_hits_holder[..]
+    } else {
+        active_hits
+    };
+
+    if hits.is_empty() {
         return None;
     }
     let min_len = view.min_remaining_ship_len().max(2);
     let max_len = view.max_remaining_ship_len().max(2);
 
-    // Check for contiguous collinear chains of length >= 2
     let mut best_collinear: Vec<((usize, usize), usize)> = Vec::new();
 
-    for &(r, c) in active_hits {
+    // 1-cell collinear bridge check
+    for &(r, c) in hits {
+        if c + 2 < WIDTH && hits.contains(&(r, c + 2)) && view.is_unshot(r, c + 1) {
+            best_collinear.push(((r, c + 1), 200));
+        }
+        if r + 2 < HEIGHT && hits.contains(&(r + 2, c)) && view.is_unshot(r + 1, c) {
+            best_collinear.push(((r + 1, c), 200));
+        }
+    }
+
+    // Check for contiguous collinear chains of length >= 2
+    for &(r, c) in hits {
         // Horizontal chain starting at (r, c)
-        if c == 0 || !active_hits.contains(&(r, c - 1)) {
+        if c == 0 || !hits.contains(&(r, c - 1)) {
             let mut end_c = c;
-            while end_c + 1 < WIDTH && active_hits.contains(&(r, end_c + 1)) {
+            while end_c + 1 < WIDTH && hits.contains(&(r, end_c + 1)) {
                 end_c += 1;
             }
             let chain_len = end_c - c + 1;
@@ -2638,9 +2908,9 @@ pub fn choose_open_side_target(
             }
         }
         // Vertical chain starting at (r, c)
-        if r == 0 || !active_hits.contains(&(r - 1, c)) {
+        if r == 0 || !hits.contains(&(r - 1, c)) {
             let mut end_r = r;
-            while end_r + 1 < HEIGHT && active_hits.contains(&(end_r + 1, c)) {
+            while end_r + 1 < HEIGHT && hits.contains(&(end_r + 1, c)) {
                 end_r += 1;
             }
             let chain_len = end_r - r + 1;
@@ -2679,7 +2949,7 @@ pub fn choose_open_side_target(
 
     // Single hit (or blocked collinear): score all 4 orthogonal neighbors by open runway!
     let mut candidates: Vec<((usize, usize), usize)> = Vec::new();
-    for &(r, c) in active_hits {
+    for &(r, c) in hits {
         let up = count_arm(view, r, c, -1, 0, max_len - 1);
         let down = count_arm(view, r, c, 1, 0, max_len - 1);
         let left = count_arm(view, r, c, 0, -1, max_len - 1);
@@ -2770,6 +3040,49 @@ pub fn remove_sunk_hits(
     active_hits.retain(|x| !to_remove.contains(x));
 }
 
+/// Silent-Sinking Endgame L/T-Junction Stub Fallback helper.
+/// When view is in SilentSinking and hits_count > 0, if no ship of length 2 can fit strictly inside
+/// Unknown cells alone (meaning every Unknown cell has 0 Unknown orthogonal neighbors),
+/// pick randomly among Unknown cells orthogonally adjacent to `view.silent_touching_stub_hits()`.
+pub fn silent_endgame_fallback(view: &TrackingBoard, rng: &mut Rng) -> Option<(usize, usize)> {
+    if !view.ruleset().is_silent_sinking() || view.hits_count() == 0 {
+        return None;
+    }
+    let unshot = view.unshot_cells();
+    if unshot.is_empty() {
+        return None;
+    }
+
+    let can_len2_fit = unshot.iter().any(|&(r, c)| {
+        (r > 0 && view.is_unshot(r - 1, c))
+            || (r + 1 < HEIGHT && view.is_unshot(r + 1, c))
+            || (c > 0 && view.is_unshot(r, c - 1))
+            || (c + 1 < WIDTH && view.is_unshot(r, c + 1))
+    });
+
+    if !can_len2_fit {
+        let stubs = view.silent_touching_stub_hits();
+        let mut adj_unshot = Vec::new();
+        for (r, c) in stubs {
+            for (dr, dc) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                let nr = r as isize + dr;
+                let nc = c as isize + dc;
+                if nr >= 0 && nr < HEIGHT as isize && nc >= 0 && nc < WIDTH as isize {
+                    let (ur, uc) = (nr as usize, nc as usize);
+                    if view.is_unshot(ur, uc) && !adj_unshot.contains(&(ur, uc)) {
+                        adj_unshot.push((ur, uc));
+                    }
+                }
+            }
+        }
+        if !adj_unshot.is_empty() {
+            return rng.choose(&adj_unshot).copied();
+        }
+    }
+
+    None
+}
+
 /// Strategy 12: Crosshair Stride + Open-Target Attack.
 ///
 /// Promoted from human Bayesian approximation:
@@ -2803,6 +3116,10 @@ impl CrosshairStrideAttack {
 }
 
 impl AttackStrategy for CrosshairStrideAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Crosshair Stride + Open-Target"
     }
@@ -2827,31 +3144,35 @@ impl AttackStrategy for CrosshairStrideAttack {
         self.mode = "crosshair_stride";
         let max_len = view.max_remaining_ship_len().max(2);
         let min_len = view.min_remaining_ship_len().max(2);
-        let stride = if max_len >= 4 { 4 } else { 2 };
-        let target_rem = self.offset4 % stride;
-
         let unshot = view.unshot_cells();
         assert!(!unshot.is_empty(), "No unshot cells remaining on board");
 
+        let strides_to_try: &[usize] = if max_len >= 4 { &[4, 2] } else { &[2] };
         let mut best_cells = Vec::new();
-        let mut best_score = 0usize;
+        let mut best_score;
 
-        for &(r, c) in &unshot {
-            if (r + c) % stride != target_rem {
-                continue;
-            }
-            let score = evaluate_crosshair_score(view, r, c, max_len, min_len);
-            if score > best_score {
-                best_score = score;
-                best_cells.clear();
-                best_cells.push((r, c));
-            } else if score == best_score && score > 0 {
-                best_cells.push((r, c));
-            }
-        }
+        for &stride in strides_to_try {
+            let target_rem = self.offset4 % stride;
+            best_cells.clear();
+            best_score = 0;
 
-        if !best_cells.is_empty() {
-            return best_cells[rng.next_usize(best_cells.len())];
+            for &(r, c) in &unshot {
+                if (r + c) % stride != target_rem {
+                    continue;
+                }
+                let score = evaluate_crosshair_score(view, r, c, max_len, min_len);
+                if score > best_score {
+                    best_score = score;
+                    best_cells.clear();
+                    best_cells.push((r, c));
+                } else if score == best_score && score > 0 {
+                    best_cells.push((r, c));
+                }
+            }
+
+            if !best_cells.is_empty() {
+                return best_cells[rng.next_usize(best_cells.len())];
+            }
         }
 
         // Fallback to any unshot cell where min_len fits
@@ -2867,6 +3188,10 @@ impl AttackStrategy for CrosshairStrideAttack {
         }
         if !fallback_fits.is_empty() {
             return fallback_fits[rng.next_usize(fallback_fits.len())];
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
         }
 
         unshot[rng.next_usize(unshot.len())]
@@ -2925,6 +3250,10 @@ impl CrosshairDescendingAttack {
 }
 
 impl AttackStrategy for CrosshairDescendingAttack {
+    fn clone_box(&self) -> Box<dyn AttackStrategy> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "Crosshair Stride (5->4->3->2)"
     }
@@ -2949,31 +3278,34 @@ impl AttackStrategy for CrosshairDescendingAttack {
         self.mode = "crosshair_5432";
         let max_len = view.max_remaining_ship_len().max(2);
         let min_len = view.min_remaining_ship_len().max(2);
-        let stride = max_len;
-        let target_rem = self.offset % stride;
-
         let unshot = view.unshot_cells();
         assert!(!unshot.is_empty(), "No unshot cells remaining on board");
 
         let mut best_cells = Vec::new();
-        let mut best_score = 0usize;
+        let mut best_score;
 
-        for &(r, c) in &unshot {
-            if (r + c) % stride != target_rem {
-                continue;
-            }
-            let score = evaluate_crosshair_score(view, r, c, max_len, min_len);
-            if score > best_score {
-                best_score = score;
-                best_cells.clear();
-                best_cells.push((r, c));
-            } else if score == best_score && score > 0 {
-                best_cells.push((r, c));
-            }
-        }
+        for stride in (2..=max_len).rev() {
+            let target_rem = self.offset % stride;
+            best_cells.clear();
+            best_score = 0usize;
 
-        if !best_cells.is_empty() {
-            return best_cells[rng.next_usize(best_cells.len())];
+            for &(r, c) in &unshot {
+                if (r + c) % stride != target_rem {
+                    continue;
+                }
+                let score = evaluate_crosshair_score(view, r, c, max_len, min_len);
+                if score > best_score {
+                    best_score = score;
+                    best_cells.clear();
+                    best_cells.push((r, c));
+                } else if score == best_score && score > 0 {
+                    best_cells.push((r, c));
+                }
+            }
+
+            if !best_cells.is_empty() {
+                return best_cells[rng.next_usize(best_cells.len())];
+            }
         }
 
         // Fallback to any unshot cell where min_len fits
@@ -2989,6 +3321,10 @@ impl AttackStrategy for CrosshairDescendingAttack {
         }
         if !fallback_fits.is_empty() {
             return fallback_fits[rng.next_usize(fallback_fits.len())];
+        }
+
+        if let Some(pos) = silent_endgame_fallback(view, rng) {
+            return pos;
         }
 
         unshot[rng.next_usize(unshot.len())]
@@ -3016,6 +3352,7 @@ impl AttackStrategy for CrosshairDescendingAttack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Ruleset;
 
     #[test]
     fn test_random_defense_validity() {
@@ -3427,5 +3764,71 @@ mod tests {
 
         assert!(board.all_sunk());
         assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_all_13_strategies_complete_silent_sinking() {
+        let mut rng = Rng::with_seed(999);
+        let mut strategies: Vec<Box<dyn AttackStrategy>> = vec![
+            Box::new(HuntAndTargetAttack::new()),
+            Box::new(CheckerboardAttack::new()),
+            Box::new(LargestRectMidpointAttack::new()),
+            Box::new(AdaptiveStrideUpAttack::new()),
+            Box::new(StaggeredFourToTwoAttack::new()),
+            Box::new(RectStrideFourAttack::new()),
+            Box::new(DescendingStrideAttack::new()),
+            Box::new(RectDescendingStrideAttack::new()),
+            Box::new(RectCheckerboardAttack::new()),
+            Box::new(MonteCarloAttack::new()),
+            Box::new(BayesianPdfAttack::new()),
+            Box::new(CrosshairStrideAttack::new()),
+            Box::new(CrosshairDescendingAttack::new()),
+        ];
+
+        let mut defenses: Vec<Box<dyn DefenseStrategy>> = vec![
+            Box::new(RandomDefense::new()),
+            Box::new(ClusteredDefense::new()),
+        ];
+
+        for strat in &mut strategies {
+            for def in &mut defenses {
+                let mut board = def.place_ships(&mut rng);
+                let mut view = TrackingBoard::with_ruleset(Ruleset::SilentSinking);
+                strat.reset();
+
+                let mut shots = 0;
+                while !board.all_sunk() && shots < 100 {
+                    shots += 1;
+                    let pos = strat.choose_shot(&view, &mut rng);
+                    assert!(view.is_unshot(pos.0, pos.1), "Strategy {} re-shot cell {:?}", strat.name(), pos);
+                    let outcome = board.receive_shot_with_ruleset(pos.0, pos.1, Ruleset::SilentSinking);
+                    assert!(!matches!(outcome, ShotOutcome::Sunk(_)), "Silent sinking must never return Sunk");
+                    view.record_shot(pos.0, pos.1, outcome);
+                    strat.on_shot_result(pos, outcome, &view);
+                }
+
+                assert!(
+                    board.all_sunk(),
+                    "Strategy {} failed to sink fleet under SilentSinking against {}",
+                    strat.name(),
+                    def.name()
+                );
+                assert!(shots <= 100);
+            }
+        }
+    }
+
+    #[test]
+    fn test_salvo_choice_distinct_cells() {
+        let mut rng = Rng::with_seed(777);
+        let view = TrackingBoard::with_ruleset(Ruleset::Salvo);
+        let mut strat = CrosshairStrideAttack::new();
+
+        let salvo = strat.choose_salvo(&view, 5, &mut rng);
+        assert_eq!(salvo.len(), 5);
+        let mut dedup = salvo.clone();
+        dedup.sort_unstable();
+        dedup.dedup();
+        assert_eq!(dedup.len(), 5, "Salvo shots must be distinct cells");
     }
 }

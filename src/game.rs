@@ -203,11 +203,64 @@ impl Player {
     }
 }
 
+/// Ruleset variants supported by the Battleship engine.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Ruleset {
+    Standard,
+    Salvo,
+    SilentSinking,
+}
+
+impl Default for Ruleset {
+    fn default() -> Self {
+        Ruleset::Standard
+    }
+}
+
+impl Ruleset {
+    pub const ALL: [Ruleset; 3] = [Ruleset::Standard, Ruleset::Salvo, Ruleset::SilentSinking];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Ruleset::Standard => "standard",
+            Ruleset::Salvo => "salvo",
+            Ruleset::SilentSinking => "silent",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Ruleset::Standard => "Standard Hasbro",
+            Ruleset::Salvo => "Salvo Mode",
+            Ruleset::SilentSinking => "Silent Sinking",
+        }
+    }
+
+    pub fn from_id(s: &str) -> Option<Ruleset> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "standard" | "hasbro" | "classic" => Some(Ruleset::Standard),
+            "salvo" | "volley" => Some(Ruleset::Salvo),
+            "silent" | "silent_sinking" | "fog" | "fog_of_war" => Some(Ruleset::SilentSinking),
+            _ => None,
+        }
+    }
+
+    pub fn is_salvo(self) -> bool {
+        matches!(self, Ruleset::Salvo)
+    }
+
+    pub fn is_silent_sinking(self) -> bool {
+        matches!(self, Ruleset::SilentSinking)
+    }
+}
+
 /// Detailed record of a single turn fired in a game or match.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MoveRecord {
     pub turn: usize,
     pub round: usize,
+    pub salvo_shot: usize,
+    pub salvo_size: usize,
     pub player: Player,
     pub row: usize,
     pub col: usize,
@@ -330,8 +383,18 @@ impl Board {
         }
     }
 
-    /// Receive a shot fired at (row, col).
+    /// Receive a shot fired at (row, col) under Standard rules.
     pub fn receive_shot(&mut self, row: usize, col: usize) -> ShotOutcome {
+        self.receive_shot_with_ruleset(row, col, Ruleset::Standard)
+    }
+
+    /// Receive a shot fired at (row, col) under an explicit ruleset.
+    pub fn receive_shot_with_ruleset(
+        &mut self,
+        row: usize,
+        col: usize,
+        ruleset: Ruleset,
+    ) -> ShotOutcome {
         assert!(
             row < HEIGHT && col < WIDTH,
             "Shot ({}, {}) out of grid bounds",
@@ -346,7 +409,11 @@ impl Board {
             let idx = kind.index();
             self.ship_hit_counts[idx] += 1;
             if self.ship_hit_counts[idx] == kind.length() {
-                ShotOutcome::Sunk(kind)
+                if ruleset.is_silent_sinking() {
+                    ShotOutcome::Hit
+                } else {
+                    ShotOutcome::Sunk(kind)
+                }
             } else {
                 ShotOutcome::Hit
             }
@@ -390,6 +457,16 @@ pub enum TrackingCell {
     Sunk(ShipKind),
 }
 
+impl TrackingCell {
+    pub fn is_hit(self) -> bool {
+        matches!(self, TrackingCell::Hit | TrackingCell::Sunk(_))
+    }
+
+    pub fn is_sunk(self) -> bool {
+        matches!(self, TrackingCell::Sunk(_))
+    }
+}
+
 /// The tracking board maintained by an attacking strategy to record shots and outcomes.
 #[derive(Clone, Debug)]
 pub struct TrackingBoard {
@@ -397,6 +474,7 @@ pub struct TrackingBoard {
     shots_fired: usize,
     hits_count: usize,
     sunk_ships: Vec<ShipKind>,
+    ruleset: Ruleset,
 }
 
 impl Default for TrackingBoard {
@@ -407,12 +485,22 @@ impl Default for TrackingBoard {
 
 impl TrackingBoard {
     pub fn new() -> Self {
+        Self::with_ruleset(Ruleset::Standard)
+    }
+
+    pub fn with_ruleset(ruleset: Ruleset) -> Self {
         Self {
             cells: [[TrackingCell::Unknown; WIDTH]; HEIGHT],
             shots_fired: 0,
             hits_count: 0,
             sunk_ships: Vec::with_capacity(5),
+            ruleset,
         }
+    }
+
+    /// Return the active ruleset for this tracking board.
+    pub fn ruleset(&self) -> Ruleset {
+        self.ruleset
     }
 
     /// Return the cell state at (row, col).
@@ -495,9 +583,180 @@ impl TrackingBoard {
             .collect()
     }
 
+    /// Find greedy non-overlapping capped chains of Hit cells (length >= 2, capped at both ends by Miss or grid edge).
+    pub fn silent_capped_chains(&self) -> Vec<Vec<(usize, usize)>> {
+        let mut candidates: Vec<Vec<(usize, usize)>> = Vec::new();
+
+        // Horizontal runs of Hit cells
+        for r in 0..HEIGHT {
+            let mut c = 0;
+            while c < WIDTH {
+                if self.cells[r][c].is_hit() {
+                    let start = c;
+                    while c < WIDTH && self.cells[r][c].is_hit() {
+                        c += 1;
+                    }
+                    let end = c - 1;
+                    let len = end - start + 1;
+                    if len >= 2 {
+                        let left_blocked = start == 0 || self.cells[r][start - 1] == TrackingCell::Miss;
+                        let right_blocked = end + 1 == WIDTH || self.cells[r][end + 1] == TrackingCell::Miss;
+                        if left_blocked && right_blocked {
+                            let run: Vec<(usize, usize)> = (start..=end).map(|col| (r, col)).collect();
+                            candidates.push(run);
+                        }
+                    }
+                } else {
+                    c += 1;
+                }
+            }
+        }
+
+        // Vertical runs of Hit cells
+        for c in 0..WIDTH {
+            let mut r = 0;
+            while r < HEIGHT {
+                if self.cells[r][c].is_hit() {
+                    let start = r;
+                    while r < HEIGHT && self.cells[r][c].is_hit() {
+                        r += 1;
+                    }
+                    let end = r - 1;
+                    let len = end - start + 1;
+                    if len >= 2 {
+                        let top_blocked = start == 0 || self.cells[start - 1][c] == TrackingCell::Miss;
+                        let bottom_blocked = end + 1 == HEIGHT || self.cells[end + 1][c] == TrackingCell::Miss;
+                        if top_blocked && bottom_blocked {
+                            let run: Vec<(usize, usize)> = (start..=end).map(|row| (row, c)).collect();
+                            candidates.push(run);
+                        }
+                    }
+                } else {
+                    r += 1;
+                }
+            }
+        }
+
+        // Greedy selection: prioritize lengths in 2..=5 sorted descending (5, 4, 3, 2), then longer runs
+        candidates.sort_by(|a, b| {
+            let prio_a = if a.len() >= 2 && a.len() <= 5 {
+                (1, a.len())
+            } else {
+                (0, a.len())
+            };
+            let prio_b = if b.len() >= 2 && b.len() <= 5 {
+                (1, b.len())
+            } else {
+                (0, b.len())
+            };
+            prio_b.cmp(&prio_a)
+        });
+
+        let mut used = [[false; WIDTH]; HEIGHT];
+        let mut selected = Vec::new();
+        for run in candidates {
+            if run.iter().all(|&(r, c)| !used[r][c]) {
+                for &(r, c) in &run {
+                    used[r][c] = true;
+                }
+                selected.push(run);
+            }
+        }
+
+        selected
+    }
+
+    /// Return all Hit cells that are NOT covered by any chain in `silent_capped_chains()`.
+    pub fn silent_unexplained_hits(&self) -> Vec<(usize, usize)> {
+        let capped = self.silent_capped_chains();
+        let mut explained = [[false; WIDTH]; HEIGHT];
+        for chain in capped {
+            for (r, c) in chain {
+                explained[r][c] = true;
+            }
+        }
+
+        let mut unexplained = Vec::new();
+        for r in 0..HEIGHT {
+            for c in 0..WIDTH {
+                if self.cells[r][c].is_hit() && !explained[r][c] {
+                    unexplained.push((r, c));
+                }
+            }
+        }
+        unexplained
+    }
+
+    /// Return all Hit cells that have at least one Unknown orthogonal neighbor.
+    pub fn silent_touching_stub_hits(&self) -> Vec<(usize, usize)> {
+        let mut stubs = Vec::new();
+        for r in 0..HEIGHT {
+            for c in 0..WIDTH {
+                if self.cells[r][c].is_hit() {
+                    let has_unknown_neighbor = (r > 0 && self.is_unshot(r - 1, c))
+                        || (r + 1 < HEIGHT && self.is_unshot(r + 1, c))
+                        || (c > 0 && self.is_unshot(r, c - 1))
+                        || (c + 1 < WIDTH && self.is_unshot(r, c + 1));
+                    if has_unknown_neighbor {
+                        stubs.push((r, c));
+                    }
+                }
+            }
+        }
+        stubs
+    }
+
+    /// Inferred effective remaining ships taking ruleset into account.
+    pub fn effective_remaining_ships(&self) -> Vec<ShipKind> {
+        if !self.ruleset.is_silent_sinking() {
+            return self.remaining_unsunk_ships();
+        }
+
+        let mut remaining = vec![
+            ShipKind::Carrier,
+            ShipKind::Battleship,
+            ShipKind::Cruiser,
+            ShipKind::Submarine,
+            ShipKind::Destroyer,
+        ];
+
+        let chains = self.silent_capped_chains();
+        for chain in chains {
+            let len = chain.len();
+            // Try exact match first
+            if let Some(pos) = remaining.iter().position(|k| k.length() == len) {
+                remaining.remove(pos);
+            } else if len >= 4 {
+                // Try decomposing into two ships k1 + k2 = len
+                let mut found_pair = None;
+                'outer: for i in 0..remaining.len() {
+                    for j in (i + 1)..remaining.len() {
+                        if remaining[i].length() + remaining[j].length() == len {
+                            found_pair = Some((i, j));
+                            break 'outer;
+                        }
+                    }
+                }
+                if let Some((i, j)) = found_pair {
+                    // Remove larger index first to avoid shifting earlier index
+                    remaining.remove(j);
+                    remaining.remove(i);
+                }
+            }
+        }
+
+        // Safety invariant: if remaining becomes empty while self.hits_count < TOTAL_SHIP_CELLS,
+        // push Destroyer so remaining is never empty before 17 hits!
+        if remaining.is_empty() && self.hits_count < TOTAL_SHIP_CELLS {
+            remaining.push(ShipKind::Destroyer);
+        }
+
+        remaining
+    }
+
     /// Minimum length among all remaining unsunk ships.
     pub fn min_remaining_ship_length(&self) -> usize {
-        self.remaining_unsunk_ships()
+        self.effective_remaining_ships()
             .into_iter()
             .map(|k| k.length())
             .min()
@@ -511,7 +770,7 @@ impl TrackingBoard {
 
     /// Maximum length among all remaining unsunk ships.
     pub fn max_remaining_ship_length(&self) -> usize {
-        self.remaining_unsunk_ships()
+        self.effective_remaining_ships()
             .into_iter()
             .map(|k| k.length())
             .max()
@@ -653,5 +912,64 @@ mod tests {
         tb.record_shot(4, 5, ShotOutcome::Sunk(ShipKind::Destroyer));
         assert_eq!(tb.sunk_ships(), &[ShipKind::Destroyer]);
         assert_eq!(tb.remaining_unsunk_ships().len(), 4);
+    }
+
+    #[test]
+    fn test_ruleset_properties_and_parsing() {
+        assert_eq!(Ruleset::default(), Ruleset::Standard);
+        assert_eq!(Ruleset::from_id("standard"), Some(Ruleset::Standard));
+        assert_eq!(Ruleset::from_id("hasbro"), Some(Ruleset::Standard));
+        assert_eq!(Ruleset::from_id("salvo"), Some(Ruleset::Salvo));
+        assert_eq!(Ruleset::from_id("volley"), Some(Ruleset::Salvo));
+        assert_eq!(Ruleset::from_id("silent"), Some(Ruleset::SilentSinking));
+        assert_eq!(Ruleset::from_id("fog_of_war"), Some(Ruleset::SilentSinking));
+        assert_eq!(Ruleset::from_id("invalid"), None);
+
+        assert!(Ruleset::Salvo.is_salvo());
+        assert!(!Ruleset::Standard.is_salvo());
+        assert!(Ruleset::SilentSinking.is_silent_sinking());
+        assert!(!Ruleset::Standard.is_silent_sinking());
+    }
+
+    #[test]
+    fn test_silent_sinking_outcome_never_sunk() {
+        let mut board = Board::new();
+        board.place_ship(ShipPlacement::new(ShipKind::Destroyer, 1, 1, Orientation::Horizontal)).unwrap();
+
+        let o1 = board.receive_shot_with_ruleset(1, 1, Ruleset::SilentSinking);
+        assert_eq!(o1, ShotOutcome::Hit);
+
+        // Second hit would normally be Sunk, but in SilentSinking it remains Hit!
+        let o2 = board.receive_shot_with_ruleset(1, 2, Ruleset::SilentSinking);
+        assert_eq!(o2, ShotOutcome::Hit);
+
+        // Ground-truth board still knows it's sunk
+        assert!(board.is_sunk(ShipKind::Destroyer));
+    }
+
+    #[test]
+    fn test_silent_inference_capped_chains() {
+        let mut tb = TrackingBoard::with_ruleset(Ruleset::SilentSinking);
+        // Place Miss at (2, 0), Hit at (2, 1), Hit at (2, 2), Hit at (2, 3), Miss at (2, 4)
+        tb.record_shot(2, 0, ShotOutcome::Miss);
+        tb.record_shot(2, 1, ShotOutcome::Hit);
+        tb.record_shot(2, 2, ShotOutcome::Hit);
+        tb.record_shot(2, 3, ShotOutcome::Hit);
+        tb.record_shot(2, 4, ShotOutcome::Miss);
+
+        let capped = tb.silent_capped_chains();
+        assert_eq!(capped.len(), 1);
+        assert_eq!(capped[0], vec![(2, 1), (2, 2), (2, 3)]);
+
+        let unexplained = tb.silent_unexplained_hits();
+        assert!(unexplained.is_empty());
+
+        // Add an isolated hit at (5, 5) with unknown neighbors
+        tb.record_shot(5, 5, ShotOutcome::Hit);
+        let unexplained2 = tb.silent_unexplained_hits();
+        assert_eq!(unexplained2, vec![(5, 5)]);
+
+        let stubs = tb.silent_touching_stub_hits();
+        assert!(stubs.contains(&(5, 5)));
     }
 }

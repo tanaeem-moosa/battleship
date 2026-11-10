@@ -8,7 +8,7 @@
 //! - Terminal-formatted summary tables and ASCII histograms
 
 use crate::game::{
-    MoveRecord, Player, ShipPlacement, ShotOutcome, TrackingBoard, TOTAL_SHIP_CELLS,
+    MoveRecord, Player, Ruleset, ShipPlacement, ShotOutcome, TrackingBoard, TOTAL_SHIP_CELLS,
 };
 use crate::rng::Rng;
 use crate::strategy::{
@@ -34,6 +34,7 @@ pub fn coord_to_str(row: usize, col: usize) -> String {
 /// Complete recording of a head-to-head match between two players.
 #[derive(Clone, Debug)]
 pub struct MatchReplay {
+    pub ruleset: Ruleset,
     pub player1_name: String,
     pub player2_name: String,
     pub player1_ships: Vec<ShipPlacement>,
@@ -125,6 +126,7 @@ pub struct DefenseEvaluation {
 /// Comprehensive benchmark report.
 #[derive(Clone, Debug)]
 pub struct BenchmarkReport {
+    pub ruleset: Ruleset,
     pub games_per_strategy: usize,
     pub seed: u64,
     pub strategies: Vec<StrategyStats>,
@@ -133,39 +135,73 @@ pub struct BenchmarkReport {
     pub defense_eval: DefenseEvaluation,
 }
 
-/// Simulate a single player game where `attack` tries to sink all ships placed by `defense`.
-/// Returns the number of turns taken (17..=100).
+/// Simulate a single player game with ruleset where `attack` tries to sink all ships placed by `defense`.
+/// Returns the number of shots taken (17..=100).
+pub fn simulate_game_with_ruleset(
+    attack: &mut dyn AttackStrategy,
+    defense: &mut dyn DefenseStrategy,
+    ruleset: Ruleset,
+    rng: &mut Rng,
+) -> usize {
+    let mut board = defense.place_ships(rng);
+    let mut view = TrackingBoard::with_ruleset(ruleset);
+    attack.reset();
+
+    let mut shots = 0;
+    if ruleset.is_salvo() {
+        while !board.all_sunk() && shots < 100 {
+            let unshot_count = view.unshot_cells().len();
+            let k = 5.min(unshot_count);
+            if k == 0 {
+                break;
+            }
+            let salvo = attack.choose_salvo(&view, k, rng);
+            let mut volley_results = Vec::new();
+            for shot in salvo {
+                shots += 1;
+                let outcome = board.receive_shot_with_ruleset(shot.0, shot.1, Ruleset::Salvo);
+                volley_results.push((shot, outcome));
+                if board.all_sunk() || shots >= 100 {
+                    break;
+                }
+            }
+            for (shot, outcome) in volley_results {
+                view.record_shot(shot.0, shot.1, outcome);
+                attack.on_shot_result(shot, outcome, &view);
+            }
+        }
+    } else {
+        while !board.all_sunk() && shots < 100 {
+            shots += 1;
+            let pos = attack.choose_shot(&view, rng);
+            let outcome = board.receive_shot_with_ruleset(pos.0, pos.1, ruleset);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+    }
+
+    shots
+}
+
+/// Backward-compatible simulate_game using Ruleset::Standard.
 pub fn simulate_game(
     attack: &mut dyn AttackStrategy,
     defense: &mut dyn DefenseStrategy,
     rng: &mut Rng,
 ) -> usize {
-    let mut board = defense.place_ships(rng);
-    let mut view = TrackingBoard::new();
-    attack.reset();
-
-    let mut turns = 0;
-    while !board.all_sunk() && turns < 100 {
-        turns += 1;
-        let pos = attack.choose_shot(&view, rng);
-        let outcome = board.receive_shot(pos.0, pos.1);
-        view.record_shot(pos.0, pos.1, outcome);
-        attack.on_shot_result(pos, outcome, &view);
-    }
-
-    turns
+    simulate_game_with_ruleset(attack, defense, Ruleset::Standard, rng)
 }
 
-/// Simulate a head-to-head match between Player 1 and Player 2.
-/// Alternates shots until one player's fleet is completely sunk.
+/// Simulate a head-to-head match between Player 1 and Player 2 with ruleset.
 /// Returns complete `MatchReplay`.
-pub fn simulate_match(
+pub fn simulate_match_with_ruleset(
     p1_name: &str,
     p1_attack: &mut dyn AttackStrategy,
     p1_defense: &mut dyn DefenseStrategy,
     p2_name: &str,
     p2_attack: &mut dyn AttackStrategy,
     p2_defense: &mut dyn DefenseStrategy,
+    ruleset: Ruleset,
     seed: u64,
 ) -> MatchReplay {
     let mut rng = Rng::with_seed(seed);
@@ -176,8 +212,8 @@ pub fn simulate_match(
     let p1_ships = p1_board.placements().to_vec();
     let p2_ships = p2_board.placements().to_vec();
 
-    let mut p1_view = TrackingBoard::new();
-    let mut p2_view = TrackingBoard::new();
+    let mut p1_view = TrackingBoard::with_ruleset(ruleset);
+    let mut p2_view = TrackingBoard::with_ruleset(ruleset);
 
     p1_attack.reset();
     p2_attack.reset();
@@ -193,102 +229,226 @@ pub fn simulate_match(
     let mut p2_misses = 0;
     let winner;
 
-    loop {
-        round += 1;
+    if ruleset.is_salvo() {
+        loop {
+            round += 1;
 
-        // Player 1 fires at Player 2's board
-        turn_seq += 1;
-        p1_shots += 1;
-        let p1_mode = p1_attack.current_mode().to_string();
-        let p1_shot = p1_attack.choose_shot(&p1_view, &mut rng);
-        let p1_outcome = p2_board.receive_shot(p1_shot.0, p1_shot.1);
-        p1_view.record_shot(p1_shot.0, p1_shot.1, p1_outcome);
-        p1_attack.on_shot_result(p1_shot, p1_outcome, &p1_view);
+            // Player 1 salvo
+            let k1 = p1_board.remaining_ships().len().max(1).min(p1_view.unshot_cells().len());
+            let p1_mode = p1_attack.current_mode().to_string();
+            let salvo1 = p1_attack.choose_salvo(&p1_view, k1, &mut rng);
+            let mut volley1_results = Vec::new();
 
-        if p1_outcome.is_hit_or_sunk() {
-            p1_hits += 1;
-        } else {
-            p1_misses += 1;
+            for (idx, shot) in salvo1.into_iter().enumerate() {
+                turn_seq += 1;
+                p1_shots += 1;
+                let outcome = p2_board.receive_shot_with_ruleset(shot.0, shot.1, Ruleset::Salvo);
+                if outcome.is_hit_or_sunk() {
+                    p1_hits += 1;
+                } else {
+                    p1_misses += 1;
+                }
+                let sunk_cells = match outcome {
+                    ShotOutcome::Sunk(kind) => p2_ships.iter().find(|p| p.kind == kind).map(|p| p.cells()),
+                    _ => None,
+                };
+                moves.push(MoveRecord {
+                    turn: turn_seq,
+                    round,
+                    player: Player::Player1,
+                    row: shot.0,
+                    col: shot.1,
+                    coord: coord_to_str(shot.0, shot.1),
+                    outcome,
+                    sunk_cells,
+                    mode: p1_mode.clone(),
+                    salvo_shot: idx + 1,
+                    salvo_size: k1,
+                    p1_shots,
+                    p1_hits,
+                    p1_misses,
+                    p1_afloat: p1_board.remaining_ships().len(),
+                    p2_shots,
+                    p2_hits,
+                    p2_misses,
+                    p2_afloat: p2_board.remaining_ships().len(),
+                });
+                volley1_results.push((shot, outcome));
+                if p2_board.all_sunk() {
+                    break;
+                }
+            }
+
+            if p2_board.all_sunk() {
+                winner = Player::Player1;
+                break;
+            }
+
+            for (shot, outcome) in volley1_results {
+                p1_view.record_shot(shot.0, shot.1, outcome);
+                p1_attack.on_shot_result(shot, outcome, &p1_view);
+            }
+
+            // Player 2 salvo
+            let k2 = p2_board.remaining_ships().len().max(1).min(p2_view.unshot_cells().len());
+            let p2_mode = p2_attack.current_mode().to_string();
+            let salvo2 = p2_attack.choose_salvo(&p2_view, k2, &mut rng);
+            let mut volley2_results = Vec::new();
+
+            for (idx, shot) in salvo2.into_iter().enumerate() {
+                turn_seq += 1;
+                p2_shots += 1;
+                let outcome = p1_board.receive_shot_with_ruleset(shot.0, shot.1, Ruleset::Salvo);
+                if outcome.is_hit_or_sunk() {
+                    p2_hits += 1;
+                } else {
+                    p2_misses += 1;
+                }
+                let sunk_cells = match outcome {
+                    ShotOutcome::Sunk(kind) => p1_ships.iter().find(|p| p.kind == kind).map(|p| p.cells()),
+                    _ => None,
+                };
+                moves.push(MoveRecord {
+                    turn: turn_seq,
+                    round,
+                    player: Player::Player2,
+                    row: shot.0,
+                    col: shot.1,
+                    coord: coord_to_str(shot.0, shot.1),
+                    outcome,
+                    sunk_cells,
+                    mode: p2_mode.clone(),
+                    salvo_shot: idx + 1,
+                    salvo_size: k2,
+                    p1_shots,
+                    p1_hits,
+                    p1_misses,
+                    p1_afloat: p1_board.remaining_ships().len(),
+                    p2_shots,
+                    p2_hits,
+                    p2_misses,
+                    p2_afloat: p2_board.remaining_ships().len(),
+                });
+                volley2_results.push((shot, outcome));
+                if p1_board.all_sunk() {
+                    break;
+                }
+            }
+
+            if p1_board.all_sunk() {
+                winner = Player::Player2;
+                break;
+            }
+
+            for (shot, outcome) in volley2_results {
+                p2_view.record_shot(shot.0, shot.1, outcome);
+                p2_attack.on_shot_result(shot, outcome, &p2_view);
+            }
         }
+    } else {
+        // Standard & Silent Sinking
+        loop {
+            round += 1;
 
-        let p1_sunk_cells = match p1_outcome {
-            ShotOutcome::Sunk(kind) => p2_ships.iter().find(|p| p.kind == kind).map(|p| p.cells()),
-            _ => None,
-        };
+            // Player 1 fires at Player 2's board
+            turn_seq += 1;
+            p1_shots += 1;
+            let p1_mode = p1_attack.current_mode().to_string();
+            let p1_shot = p1_attack.choose_shot(&p1_view, &mut rng);
+            let p1_outcome = p2_board.receive_shot_with_ruleset(p1_shot.0, p1_shot.1, ruleset);
+            p1_view.record_shot(p1_shot.0, p1_shot.1, p1_outcome);
+            p1_attack.on_shot_result(p1_shot, p1_outcome, &p1_view);
 
-        moves.push(MoveRecord {
-            turn: turn_seq,
-            round,
-            player: Player::Player1,
-            row: p1_shot.0,
-            col: p1_shot.1,
-            coord: coord_to_str(p1_shot.0, p1_shot.1),
-            outcome: p1_outcome,
-            sunk_cells: p1_sunk_cells,
-            mode: p1_mode,
-            p1_shots,
-            p1_hits,
-            p1_misses,
-            p1_afloat: p1_board.remaining_ships().len(),
-            p2_shots,
-            p2_hits,
-            p2_misses,
-            p2_afloat: p2_board.remaining_ships().len(),
-        });
+            if p1_outcome.is_hit_or_sunk() {
+                p1_hits += 1;
+            } else {
+                p1_misses += 1;
+            }
 
-        if p2_board.all_sunk() {
-            winner = Player::Player1;
-            break;
-        }
+            let p1_sunk_cells = match p1_outcome {
+                ShotOutcome::Sunk(kind) => p2_ships.iter().find(|p| p.kind == kind).map(|p| p.cells()),
+                _ => None,
+            };
 
-        // Player 2 fires at Player 1's board
-        turn_seq += 1;
-        p2_shots += 1;
-        let p2_mode = p2_attack.current_mode().to_string();
-        let p2_shot = p2_attack.choose_shot(&p2_view, &mut rng);
-        let p2_outcome = p1_board.receive_shot(p2_shot.0, p2_shot.1);
-        p2_view.record_shot(p2_shot.0, p2_shot.1, p2_outcome);
-        p2_attack.on_shot_result(p2_shot, p2_outcome, &p2_view);
+            moves.push(MoveRecord {
+                turn: turn_seq,
+                round,
+                player: Player::Player1,
+                row: p1_shot.0,
+                col: p1_shot.1,
+                coord: coord_to_str(p1_shot.0, p1_shot.1),
+                outcome: p1_outcome,
+                sunk_cells: p1_sunk_cells,
+                mode: p1_mode,
+                salvo_shot: 1,
+                salvo_size: 1,
+                p1_shots,
+                p1_hits,
+                p1_misses,
+                p1_afloat: p1_board.remaining_ships().len(),
+                p2_shots,
+                p2_hits,
+                p2_misses,
+                p2_afloat: p2_board.remaining_ships().len(),
+            });
 
-        if p2_outcome.is_hit_or_sunk() {
-            p2_hits += 1;
-        } else {
-            p2_misses += 1;
-        }
+            if p2_board.all_sunk() {
+                winner = Player::Player1;
+                break;
+            }
 
-        let p2_sunk_cells = match p2_outcome {
-            ShotOutcome::Sunk(kind) => p1_ships.iter().find(|p| p.kind == kind).map(|p| p.cells()),
-            _ => None,
-        };
+            // Player 2 fires at Player 1's board
+            turn_seq += 1;
+            p2_shots += 1;
+            let p2_mode = p2_attack.current_mode().to_string();
+            let p2_shot = p2_attack.choose_shot(&p2_view, &mut rng);
+            let p2_outcome = p1_board.receive_shot_with_ruleset(p2_shot.0, p2_shot.1, ruleset);
+            p2_view.record_shot(p2_shot.0, p2_shot.1, p2_outcome);
+            p2_attack.on_shot_result(p2_shot, p2_outcome, &p2_view);
 
-        moves.push(MoveRecord {
-            turn: turn_seq,
-            round,
-            player: Player::Player2,
-            row: p2_shot.0,
-            col: p2_shot.1,
-            coord: coord_to_str(p2_shot.0, p2_shot.1),
-            outcome: p2_outcome,
-            sunk_cells: p2_sunk_cells,
-            mode: p2_mode,
-            p1_shots,
-            p1_hits,
-            p1_misses,
-            p1_afloat: p1_board.remaining_ships().len(),
-            p2_shots,
-            p2_hits,
-            p2_misses,
-            p2_afloat: p2_board.remaining_ships().len(),
-        });
+            if p2_outcome.is_hit_or_sunk() {
+                p2_hits += 1;
+            } else {
+                p2_misses += 1;
+            }
 
-        if p1_board.all_sunk() {
-            winner = Player::Player2;
-            break;
+            let p2_sunk_cells = match p2_outcome {
+                ShotOutcome::Sunk(kind) => p1_ships.iter().find(|p| p.kind == kind).map(|p| p.cells()),
+                _ => None,
+            };
+
+            moves.push(MoveRecord {
+                turn: turn_seq,
+                round,
+                player: Player::Player2,
+                row: p2_shot.0,
+                col: p2_shot.1,
+                coord: coord_to_str(p2_shot.0, p2_shot.1),
+                outcome: p2_outcome,
+                sunk_cells: p2_sunk_cells,
+                mode: p2_mode,
+                salvo_shot: 1,
+                salvo_size: 1,
+                p1_shots,
+                p1_hits,
+                p1_misses,
+                p1_afloat: p1_board.remaining_ships().len(),
+                p2_shots,
+                p2_hits,
+                p2_misses,
+                p2_afloat: p2_board.remaining_ships().len(),
+            });
+
+            if p1_board.all_sunk() {
+                winner = Player::Player2;
+                break;
+            }
         }
     }
 
     let total_moves = moves.len();
     MatchReplay {
+        ruleset,
         player1_name: p1_name.to_string(),
         player2_name: p2_name.to_string(),
         player1_ships: p1_ships,
@@ -299,6 +459,28 @@ pub fn simulate_match(
         total_moves,
         seed,
     }
+}
+
+/// Backward-compatible simulate_match using Ruleset::Standard.
+pub fn simulate_match(
+    p1_name: &str,
+    p1_attack: &mut dyn AttackStrategy,
+    p1_defense: &mut dyn DefenseStrategy,
+    p2_name: &str,
+    p2_attack: &mut dyn AttackStrategy,
+    p2_defense: &mut dyn DefenseStrategy,
+    seed: u64,
+) -> MatchReplay {
+    simulate_match_with_ruleset(
+        p1_name,
+        p1_attack,
+        p1_defense,
+        p2_name,
+        p2_attack,
+        p2_defense,
+        Ruleset::Standard,
+        seed,
+    )
 }
 
 /// Compute statistical distribution metrics from a list of turn values.
@@ -450,12 +632,12 @@ pub fn create_defense_instance(
     }
 }
 
-/// Execute a full benchmark over `games` iterations:
+/// Execute a full benchmark with ruleset over `games` iterations:
 /// 1. Evaluates all 13 strategies in solo simulation
 /// 2. Executes a complete 13x13 All-Pairs Head-to-Head Tournament alternating first-turn player
 /// 3. Evaluates all 7 Defenses x 13 Attackers Survival Matrix (91 cells)
 /// 4. Executes a complete 7x7 Defense Head-to-Head Tournament
-pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
+pub fn run_benchmark_with_ruleset(games: usize, seed: u64, ruleset: Ruleset) -> BenchmarkReport {
     let mut rng = Rng::with_seed(seed);
     let mut defense = RandomDefense::new();
 
@@ -465,7 +647,7 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
         let (mut strat, id, name) = create_strategy_instance(idx);
         let mut turns = Vec::with_capacity(games);
         for _ in 0..games {
-            turns.push(simulate_game(strat.as_mut(), &mut defense, &mut rng));
+            turns.push(simulate_game_with_ruleset(strat.as_mut(), &mut defense, ruleset, &mut rng));
         }
         strategies.push(compute_stats(id, name, turns));
     }
@@ -489,13 +671,14 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
                 let match_seed = rng.next_u64();
                 // Alternate starting player each match to eliminate first-player advantage
                 if g % 2 == 0 {
-                    let replay = simulate_match(
+                    let replay = simulate_match_with_ruleset(
                         name_i,
                         strat_i.as_mut(),
                         &mut def1,
                         name_j,
                         strat_j.as_mut(),
                         &mut def2,
+                        ruleset,
                         match_seed,
                     );
                     if replay.winner == Player::Player1 {
@@ -504,13 +687,14 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
                         j_wins += 1;
                     }
                 } else {
-                    let replay = simulate_match(
+                    let replay = simulate_match_with_ruleset(
                         name_j,
                         strat_j.as_mut(),
                         &mut def2,
                         name_i,
                         strat_i.as_mut(),
                         &mut def1,
+                        ruleset,
                         match_seed,
                     );
                     if replay.winner == Player::Player1 {
@@ -608,7 +792,7 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
             let (mut att, _, _) = create_strategy_instance(a);
             let mut pair_turns = Vec::with_capacity(cell_games);
             for _ in 0..cell_games {
-                let turns = simulate_game(att.as_mut(), def.as_mut(), &mut rng);
+                let turns = simulate_game_with_ruleset(att.as_mut(), def.as_mut(), ruleset, &mut rng);
                 pair_turns.push(turns);
                 all_turns_for_d.push(turns);
             }
@@ -642,13 +826,14 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
                     let match_seed = rng.next_u64();
 
                     if r % 2 == 0 {
-                        let replay = simulate_match(
+                        let replay = simulate_match_with_ruleset(
                             def_name_i,
                             att1.as_mut(),
                             def_i.as_mut(),
                             def_name_j,
                             att2.as_mut(),
                             def_j.as_mut(),
+                            ruleset,
                             match_seed,
                         );
                         if replay.winner == Player::Player1 {
@@ -657,13 +842,14 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
                             j_wins += 1;
                         }
                     } else {
-                        let replay = simulate_match(
+                        let replay = simulate_match_with_ruleset(
                             def_name_j,
                             att2.as_mut(),
                             def_j.as_mut(),
                             def_name_i,
                             att1.as_mut(),
                             def_i.as_mut(),
+                            ruleset,
                             match_seed,
                         );
                         if replay.winner == Player::Player1 {
@@ -773,6 +959,7 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
     };
 
     BenchmarkReport {
+        ruleset,
         games_per_strategy: games,
         seed,
         strategies,
@@ -780,6 +967,11 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
         tournament,
         defense_eval,
     }
+}
+
+/// Backward-compatible run_benchmark using Ruleset::Standard.
+pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
+    run_benchmark_with_ruleset(games, seed, Ruleset::Standard)
 }
 
 // =========================================================================
@@ -858,7 +1050,7 @@ fn move_record_to_json(m: &MoveRecord) -> String {
     let player_num = if m.player == Player::Player1 { 1 } else { 2 };
 
     format!(
-        "{{\"turn\":{},\"round\":{},\"player\":{},\"player_num\":{},\"row\":{},\"col\":{},\"coord\":{},\"result\":{},\"outcome\":{},\"ship\":{},\"sunk_ship\":{},\"sunk_cells\":{},\"ai_mode\":{},\"mode\":{},\"p1_stats\":{{\"shots\":{},\"hits\":{},\"misses\":{},\"afloat\":{},\"mode\":\"HUNT\",\"queue_len\":0}},\"p2_stats\":{{\"shots\":{},\"hits\":{},\"misses\":{},\"afloat\":{},\"mode\":\"HUNT\",\"queue_len\":0}}}}",
+        "{{\"turn\":{},\"round\":{},\"player\":{},\"player_num\":{},\"row\":{},\"col\":{},\"coord\":{},\"result\":{},\"outcome\":{},\"ship\":{},\"sunk_ship\":{},\"sunk_cells\":{},\"ai_mode\":{},\"mode\":{},\"salvo_shot\":{},\"salvo_size\":{},\"p1_stats\":{{\"shots\":{},\"hits\":{},\"misses\":{},\"afloat\":{},\"mode\":\"HUNT\",\"queue_len\":0}},\"p2_stats\":{{\"shots\":{},\"hits\":{},\"misses\":{},\"afloat\":{},\"mode\":\"HUNT\",\"queue_len\":0}}}}",
         m.turn,
         m.round,
         player_num,
@@ -873,6 +1065,8 @@ fn move_record_to_json(m: &MoveRecord) -> String {
         sunk_cells_json,
         json_str(ai_mode),
         json_str(&m.mode),
+        m.salvo_shot,
+        m.salvo_size,
         m.p1_shots,
         m.p1_hits,
         m.p1_misses,
@@ -902,8 +1096,10 @@ impl MatchReplay {
         };
 
         format!(
-            "{{\"seed\":{},\"player1_name\":{},\"player2_name\":{},\"p1_strategy\":{},\"p2_strategy\":{},\"winner\":{},\"winner_name\":{},\"total_rounds\":{},\"total_moves\":{},\"total_turns\":{},\"p1_fleet\":[{}],\"p2_fleet\":[{}],\"player1_ships\":[{}],\"player2_ships\":[{}],\"turns\":[{}],\"moves\":[{}]}}",
+            "{{\"seed\":{},\"ruleset\":{},\"ruleset_name\":{},\"player1_name\":{},\"player2_name\":{},\"p1_strategy\":{},\"p2_strategy\":{},\"winner\":{},\"winner_name\":{},\"total_rounds\":{},\"total_moves\":{},\"total_turns\":{},\"p1_fleet\":[{}],\"p2_fleet\":[{}],\"player1_ships\":[{}],\"player2_ships\":[{}],\"turns\":[{}],\"moves\":[{}]}}",
             self.seed,
+            json_str(self.ruleset.id()),
+            json_str(self.ruleset.name()),
             json_str(&self.player1_name),
             json_str(&self.player2_name),
             json_str(p1_strat),
@@ -1068,7 +1264,9 @@ impl BenchmarkReport {
         let def_tourn_json = self.defense_eval.tournament.to_json();
 
         format!(
-            "{{\"games\":{},\"games_per_strategy\":{},\"seed\":{},\"strategies\":{{\"random_hunt\":{},\"random\":{},\"checkerboard_hunt\":{},\"checkerboard\":{},\"largest_rect\":{},\"adaptive_stride\":{},\"stride4_to_2\":{},\"rect_stride4\":{},\"stride_5432\":{},\"rect_stride_5432\":{},\"rect_checkerboard\":{},\"monte_carlo\":{},\"bayesian_pdf\":{},\"crosshair_stride\":{},\"crosshair_5432\":{},\"strategy_list\":[{}]}},\"head_to_head\":{{\"p1_name\":{},\"p2_name\":{},\"total_games\":{},\"p1_wins\":{},\"p2_wins\":{},\"p1_win_rate\":{:.4},\"p2_win_rate\":{:.4},\"checkerboard_wins\":{},\"random_wins\":{},\"checkerboard_win_rate\":{:.1},\"random_win_rate\":{:.1}}},\"head_to_head_matrix\":{},\"tournament\":{},\"defense_eval\":{},\"defense_evaluation\":{},\"defense_tournament\":{}}}",
+            "{{\"ruleset\":{},\"ruleset_name\":{},\"games\":{},\"games_per_strategy\":{},\"seed\":{},\"strategies\":{{\"random_hunt\":{},\"random\":{},\"checkerboard_hunt\":{},\"checkerboard\":{},\"largest_rect\":{},\"adaptive_stride\":{},\"stride4_to_2\":{},\"rect_stride4\":{},\"stride_5432\":{},\"rect_stride_5432\":{},\"rect_checkerboard\":{},\"monte_carlo\":{},\"bayesian_pdf\":{},\"crosshair_stride\":{},\"crosshair_5432\":{},\"strategy_list\":[{}]}},\"head_to_head\":{{\"p1_name\":{},\"p2_name\":{},\"total_games\":{},\"p1_wins\":{},\"p2_wins\":{},\"p1_win_rate\":{:.4},\"p2_win_rate\":{:.4},\"checkerboard_wins\":{},\"random_wins\":{},\"checkerboard_win_rate\":{:.1},\"random_win_rate\":{:.1}}},\"head_to_head_matrix\":{},\"tournament\":{},\"defense_eval\":{},\"defense_evaluation\":{},\"defense_tournament\":{}}}",
+            json_str(self.ruleset.id()),
+            json_str(self.ruleset.name()),
             self.games_per_strategy,
             self.games_per_strategy,
             self.seed,
@@ -1112,7 +1310,7 @@ impl BenchmarkReport {
 pub fn print_benchmark_summary(report: &BenchmarkReport) {
     println!();
     println!("=========================================================================================================");
-    println!("                                   BATTLESHIP ENGINE BENCHMARK REPORT                                    ");
+    println!("                      BATTLESHIP ENGINE BENCHMARK REPORT - {:<36}", report.ruleset.name().to_uppercase());
     println!("=========================================================================================================");
     let battles_count = report
         .tournament
@@ -1121,8 +1319,8 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
         .map(|p| p.total_games)
         .unwrap_or(0);
     println!(
-        "Games simulated: {} solo per strategy | Tournament: {} duels per pair | Base Seed: {}",
-        report.games_per_strategy, battles_count, report.seed
+        "Ruleset: {} | Games: {} solo per strategy | Tournament: {} duels per pair | Seed: {}",
+        report.ruleset.name(), report.games_per_strategy, battles_count, report.seed
     );
     println!();
     println!("ATTACK STRATEGY PERFORMANCE (Turns to sink all 17 ship cells):");
@@ -1284,6 +1482,66 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
     println!("=========================================================================================================");
 }
 
+/// Print clean ASCII comparison tables of Solo Mean Shots & Tournament Win% across rulesets.
+pub fn print_cross_ruleset_summary(reports: &[BenchmarkReport]) {
+    if reports.is_empty() {
+        return;
+    }
+    println!();
+    println!("=========================================================================================================");
+    println!("                               CROSS-RULESET BENCHMARK COMPARISON SUMMARY                                ");
+    println!("=========================================================================================================");
+    println!();
+    println!("ATTACK STRATEGIES CROSS-RULESET PERFORMANCE (Solo Mean Shots & Tournament Win %):");
+    println!("+----+-----------------------------------+--------------------+--------------------+--------------------+");
+    println!("| #  | Strategy                          | Standard Hasbro    | Salvo Mode         | Silent Sinking     |");
+    println!("|    |                                   |  Mean   |  Win %   |  Mean   |  Win %   |  Mean   |  Win %   |");
+    println!("+----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+    for i in 0..NUM_STRATEGIES {
+        let name = &reports[0].strategies[i].name;
+        print!("| {:>2} | {:<33} |", i + 1, name);
+        for r in reports {
+            let mean = r.strategies[i].mean;
+            let win_rate = r
+                .tournament
+                .standings
+                .iter()
+                .find(|s| s.id == r.strategies[i].id)
+                .map(|s| s.win_rate * 100.0)
+                .unwrap_or(0.0);
+            print!("  {:>5.1}  |  {:>5.1}%  |", mean, win_rate);
+        }
+        println!();
+    }
+    println!("+----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+    println!();
+    println!("DEFENSE STRATEGIES CROSS-RULESET PERFORMANCE (Survival Mean & Tournament Win %):");
+    println!("+-----+-----------------------------------+--------------------+--------------------+--------------------+");
+    println!("|  #  | Defense Strategy                  | Standard Hasbro    | Salvo Mode         | Silent Sinking     |");
+    println!("|     |                                   |  Surv   |  Win %   |  Surv   |  Win %   |  Surv   |  Win %   |");
+    println!("+-----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+    for d in 0..NUM_DEFENSES {
+        let name = &reports[0].defense_eval.defense_names[d];
+        let def_id = &reports[0].defense_eval.defense_ids[d];
+        print!("| [D{}] | {:<33} |", d + 1, name);
+        for r in reports {
+            let surv = r.defense_eval.defense_stats[d].mean;
+            let win_rate = r
+                .defense_eval
+                .tournament
+                .standings
+                .iter()
+                .find(|s| s.id == *def_id)
+                .map(|s| s.win_rate * 100.0)
+                .unwrap_or(0.0);
+            print!("  {:>5.1}  |  {:>5.1}%  |", surv, win_rate);
+        }
+        println!();
+    }
+    println!("+-----+-----------------------------------+---------+----------+---------+----------+---------+----------+");
+    println!("=========================================================================================================");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1360,5 +1618,76 @@ mod tests {
         assert!(json.contains("\"defense_evaluation\""));
         assert!(json.contains("\"survival_matrix\""));
         assert!(json.contains("\"defense_tournament\""));
+    }
+
+    #[test]
+    fn test_salvo_match_dynamic_shrink_and_records() {
+        let mut p1_att = CrosshairStrideAttack::new();
+        let mut p1_def = RandomDefense::new();
+        let mut p2_att = BayesianPdfAttack::new();
+        let mut p2_def = RandomDefense::new();
+
+        let replay = simulate_match_with_ruleset(
+            "SalvoP1",
+            &mut p1_att,
+            &mut p1_def,
+            "SalvoP2",
+            &mut p2_att,
+            &mut p2_def,
+            Ruleset::Salvo,
+            333,
+        );
+
+        assert_eq!(replay.ruleset, Ruleset::Salvo);
+        assert!(!replay.moves.is_empty());
+        // Verify salvo_shot and salvo_size fields
+        for m in &replay.moves {
+            assert!(m.salvo_shot >= 1);
+            assert!(m.salvo_size >= 1 && m.salvo_size <= 5);
+            assert!(m.salvo_shot <= m.salvo_size);
+        }
+
+        let json = replay.to_json();
+        assert!(json.contains("\"ruleset\":\"salvo\""));
+        assert!(json.contains("\"ruleset_name\":\"Salvo Mode\""));
+        assert!(json.contains("\"salvo_shot\":"));
+        assert!(json.contains("\"salvo_size\":"));
+    }
+
+    #[test]
+    fn test_match_with_silent_sinking() {
+        let mut p1_att = MonteCarloAttack::new();
+        let mut p1_def = ClusteredDefense::new();
+        let mut p2_att = CheckerboardAttack::new();
+        let mut p2_def = SpacedDefense::new();
+
+        let replay = simulate_match_with_ruleset(
+            "SilentP1",
+            &mut p1_att,
+            &mut p1_def,
+            "SilentP2",
+            &mut p2_att,
+            &mut p2_def,
+            Ruleset::SilentSinking,
+            444,
+        );
+
+        assert_eq!(replay.ruleset, Ruleset::SilentSinking);
+        for m in &replay.moves {
+            assert!(!matches!(m.outcome, ShotOutcome::Sunk(_)));
+            assert!(m.sunk_cells.is_none());
+        }
+
+        let json = replay.to_json();
+        assert!(json.contains("\"ruleset\":\"silent\""));
+        assert!(json.contains("\"ruleset_name\":\"Silent Sinking\""));
+    }
+
+    #[test]
+    fn test_json_serialization_ruleset_fields() {
+        let report = run_benchmark_with_ruleset(5, 777, Ruleset::SilentSinking);
+        let json = report.to_json();
+        assert!(json.contains("\"ruleset\":\"silent\""));
+        assert!(json.contains("\"ruleset_name\":\"Silent Sinking\""));
     }
 }

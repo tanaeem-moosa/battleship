@@ -6,8 +6,8 @@ pub mod server;
 
 pub use rng::Rng;
 pub use game::{
-    Board, MoveRecord, Orientation, Player, ShipKind, ShipPlacement, ShotOutcome, TrackingBoard,
-    TrackingCell, HEIGHT, TOTAL_SHIP_CELLS, WIDTH,
+    Board, MoveRecord, Orientation, Player, Ruleset, ShipKind, ShipPlacement, ShotOutcome,
+    TrackingBoard, TrackingCell, HEIGHT, TOTAL_SHIP_CELLS, WIDTH,
 };
 pub use strategy::{
     compute_bayesian_density, count_arm, evaluate_crosshair_score, choose_open_side_target,
@@ -20,7 +20,8 @@ pub use strategy::{
     SpacedDefense, StaggeredFourToTwoAttack, TargetTracker,
 };
 pub use sim::{
-    compute_stats, print_benchmark_summary, run_benchmark, simulate_game, simulate_match,
-    BenchmarkReport, HeadToHeadStats, MatchReplay, StrategyStats,
+    compute_stats, print_benchmark_summary, print_cross_ruleset_summary, run_benchmark,
+    run_benchmark_with_ruleset, simulate_game, simulate_game_with_ruleset, simulate_match,
+    simulate_match_with_ruleset, BenchmarkReport, HeadToHeadStats, MatchReplay, StrategyStats,
 };
 pub use server::run_server;

@@ -12,8 +12,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 
+use crate::game::Ruleset;
 use crate::rng::Rng;
-use crate::sim::{run_benchmark, simulate_match};
+use crate::sim::{run_benchmark_with_ruleset, simulate_match_with_ruleset};
 use crate::strategy::{
     AdaptiveStrideUpAttack, AntiMidpointDefense, AttackStrategy, BaitAndHideDefense,
     BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense,
@@ -239,6 +240,11 @@ fn handle_api_match(
     let d1_id = query.get("d1").map(|s| s.as_str()).unwrap_or("random");
     let d2_id = query.get("d2").map(|s| s.as_str()).unwrap_or("random");
 
+    let ruleset = query
+        .get("ruleset")
+        .and_then(|s| Ruleset::from_id(s))
+        .unwrap_or(Ruleset::Standard);
+
     let seed = query
         .get("seed")
         .and_then(|s| s.parse::<u64>().ok())
@@ -249,13 +255,14 @@ fn handle_api_match(
     let (mut p1_def, _) = create_defense(d1_id);
     let (mut p2_def, _) = create_defense(d2_id);
 
-    let replay = simulate_match(
+    let replay = simulate_match_with_ruleset(
         p1_name,
         p1_att.as_mut(),
         p1_def.as_mut(),
         p2_name,
         p2_att.as_mut(),
         p2_def.as_mut(),
+        ruleset,
         seed,
     );
 
@@ -278,12 +285,17 @@ fn handle_api_benchmark(
         .unwrap_or(200)
         .min(5000);
 
+    let ruleset = query
+        .get("ruleset")
+        .and_then(|s| Ruleset::from_id(s))
+        .unwrap_or(Ruleset::Standard);
+
     let seed = query
         .get("seed")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or_else(|| Rng::from_time().next_u64());
 
-    let report = run_benchmark(games, seed);
+    let report = run_benchmark_with_ruleset(games, seed, ruleset);
     let json = report.to_json();
 
     send_response(

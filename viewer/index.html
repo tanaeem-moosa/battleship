@@ -21,7 +21,7 @@
       </div>
       <div class="header-branding">
         <h1 class="tactical-title">BATTLESHIP <span class="accent-text">COMMAND &amp; STRATEGY LAB</span></h1>
-        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 13 ATTACK STRATEGIES • TOURNAMENT MATRIX</div>
+        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 13 ATTACK STRATEGIES • 3 RULESET VARIANTS</div>
       </div>
     </div>
 
@@ -37,6 +37,10 @@
     </div>
 
     <div class="header-right">
+      <div id="active-ruleset-badge" class="ruleset-badge badge-standard">
+        <span class="ruleset-dot"></span>
+        <span id="active-ruleset-name" class="ruleset-text">Standard Hasbro</span>
+      </div>
       <div id="engine-status-badge" class="engine-badge in-browser">
         <span class="status-pulse-dot"></span>
         <span id="engine-status-text" class="status-text">Detecting Engine...</span>
@@ -132,6 +136,15 @@
               </select>
             </div>
           </div>
+        </div>
+
+        <div class="control-group ruleset-group">
+          <label for="select-ruleset">Ruleset:</label>
+          <select id="select-ruleset" class="tactical-select">
+            <option value="standard" selected>Standard Hasbro (1-Shot)</option>
+            <option value="salvo">Salvo Mode (Volley = Ships)</option>
+            <option value="silent">Silent Sinking (Fog of War)</option>
+          </select>
         </div>
 
         <div class="control-group seed-group">
@@ -381,6 +394,46 @@
     <!-- ==================== TAB 2: STRATEGY BENCHMARK LAB ==================== -->
     <section id="benchmark-view" class="view-panel">
       
+      <!-- Ruleset Segmented Switcher Bar -->
+      <div class="ruleset-switcher-bar">
+        <div class="ruleset-switcher-label">
+          <span class="ruleset-switcher-icon">⚙️</span>
+          <span>RULESET VARIANT:</span>
+        </div>
+        <div class="ruleset-segmented-pills" id="ruleset-benchmark-pills">
+          <button class="ruleset-pill active" data-ruleset="standard">
+            <div class="pill-top-row">
+              <span class="pill-dot dot-standard"></span>
+              <span class="pill-title">Standard Hasbro</span>
+            </div>
+            <span class="pill-tagline">1-Shot • Sunk Announced</span>
+          </button>
+          <button class="ruleset-pill" data-ruleset="salvo">
+            <div class="pill-top-row">
+              <span class="pill-dot dot-salvo"></span>
+              <span class="pill-title">Salvo Mode</span>
+            </div>
+            <span class="pill-tagline">Volley = Surviving Ships</span>
+          </button>
+          <button class="ruleset-pill" data-ruleset="silent">
+            <div class="pill-top-row">
+              <span class="pill-dot dot-silent"></span>
+              <span class="pill-title">Silent Sinking</span>
+            </div>
+            <span class="pill-tagline">Fog of War • No Alerts</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Ruleset Mechanics Tactical Banner -->
+      <div id="ruleset-mechanics-banner" class="ruleset-mechanics-banner banner-standard">
+        <div class="banner-mechanics-icon" id="mechanics-banner-icon">🎯</div>
+        <div class="banner-mechanics-content">
+          <div class="banner-mechanics-title" id="mechanics-banner-title">Standard Hasbro Ruleset</div>
+          <div class="banner-mechanics-desc" id="mechanics-banner-desc">Alternating 1 shot per turn with instant sunk announcements upon destroying all cells of a vessel. Classic baseline naval combat.</div>
+        </div>
+      </div>
+
       <!-- Benchmark Controls Header -->
       <div class="benchmark-controls-panel">
         <div class="benchmark-inputs">
@@ -628,6 +681,85 @@
 
         </div>
       </div><!-- End #defense-benchmark-section -->
+
+      <!-- ==================== CROSS-RULESET META SHIFT COMPARISON CARD ==================== -->
+      <div class="cross-ruleset-meta-card" id="cross-ruleset-meta-card">
+        <div class="cross-meta-header">
+          <div class="cross-meta-title-group">
+            <h3 class="cross-meta-title">
+              <span>🌐</span>
+              <span>CROSS-RULESET META SHIFT (Standard vs. Salvo vs. Silent Sinking)</span>
+            </h3>
+            <span class="cross-meta-subtitle">Direct multi-ruleset comparison of algorithmic rankings, win rates, and survival durability across all 3 rule variants</span>
+          </div>
+        </div>
+
+        <div class="cross-meta-tables-grid">
+          
+          <!-- Table 1: 13 Attack Strategies Across Rulesets -->
+          <div class="cross-meta-subcard">
+            <div class="cross-subcard-title">
+              <span>⚔️</span>
+              <span>13 Attack Strategies Across Rulesets</span>
+            </div>
+            <div class="cross-meta-table-wrapper">
+              <table class="cross-meta-table" id="cross-meta-attack-table">
+                <thead>
+                  <tr>
+                    <th>STRATEGY</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-standard);">STD RANK</th>
+                    <th>STD WIN%</th>
+                    <th>STD MEAN</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-salvo);">SALVO RANK</th>
+                    <th>Δ RANK</th>
+                    <th>SALVO WIN%</th>
+                    <th>SALVO MEAN</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-silent);">SILENT RANK</th>
+                    <th>Δ RANK</th>
+                    <th>SILENT WIN%</th>
+                    <th>SILENT MEAN</th>
+                  </tr>
+                </thead>
+                <tbody id="cross-meta-attack-tbody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Table 2: 7 Defense Strategies Across Rulesets -->
+          <div class="cross-meta-subcard">
+            <div class="cross-subcard-title">
+              <span>🛡️</span>
+              <span>7 Defense Strategies Across Rulesets</span>
+            </div>
+            <div class="cross-meta-table-wrapper">
+              <table class="cross-meta-table" id="cross-meta-defense-table">
+                <thead>
+                  <tr>
+                    <th>DEFENSE STRATEGY</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-standard);">STD RANK</th>
+                    <th>STD WIN%</th>
+                    <th>STD SURVIVED</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-salvo);">SALVO RANK</th>
+                    <th>Δ RANK</th>
+                    <th>SALVO WIN%</th>
+                    <th>SALVO SURVIVED</th>
+                    <th class="th-ruleset-col" style="color: var(--ruleset-silent);">SILENT RANK</th>
+                    <th>Δ RANK</th>
+                    <th>SILENT WIN%</th>
+                    <th>SILENT SURVIVED</th>
+                  </tr>
+                </thead>
+                <tbody id="cross-meta-defense-tbody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
 
     </section>
 
