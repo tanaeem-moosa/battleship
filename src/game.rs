@@ -499,6 +499,11 @@ impl TrackingBoard {
             .unwrap_or(2)
     }
 
+    /// Alias for min_remaining_ship_length.
+    pub fn min_remaining_ship_len(&self) -> usize {
+        self.min_remaining_ship_length()
+    }
+
     /// Maximum length among all remaining unsunk ships.
     pub fn max_remaining_ship_length(&self) -> usize {
         self.remaining_unsunk_ships()
@@ -506,6 +511,11 @@ impl TrackingBoard {
             .map(|k| k.length())
             .max()
             .unwrap_or(5)
+    }
+
+    /// Alias for max_remaining_ship_length.
+    pub fn max_remaining_ship_len(&self) -> usize {
+        self.max_remaining_ship_length()
     }
 
     /// Check if a ship of length `len` could legally fit covering (row, col)

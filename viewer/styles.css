@@ -29,9 +29,13 @@
   --water-blue: #0b1726;
   --water-grid: #132337;
 
-  /* Strategy Distinct Colors */
+  /* 6 Strategy Distinct Colors */
   --color-random: #f97316;
   --color-checkerboard: #38bdf8;
+  --color-largest-rect: #10b981;
+  --color-adaptive-stride: #a855f7;
+  --color-stride4-to-2: #ec4899;
+  --color-rect-stride4: #f59e0b;
 
   /* Ship Colors */
   --ship-carrier: #0ea5e9;
@@ -685,7 +689,6 @@ body.command-center-theme {
 
 /* Checkerboard Parity Layer */
 .grid-cell.parity-cell {
-  /* Subtle tactical diamond/hatch */
   background-color: #0d1c2e;
 }
 .show-parity .grid-cell.parity-cell::before {
@@ -718,7 +721,7 @@ body.command-center-theme {
   50% { outline-color: rgba(251, 191, 36, 0.3); }
 }
 
-/* Ship Segment Visuals (Visible when Fog of War is OFF or Ship is Hit/Sunk) */
+/* Ship Segment Visuals */
 .grid-cell.has-ship-carrier {
   background: rgba(14, 165, 233, 0.25);
   border-color: var(--ship-carrier);
@@ -1291,12 +1294,189 @@ body.command-center-theme {
   transition: width 0.15s ease-out;
 }
 
-/* Benchmark Summary Cards Grid */
-.benchmark-cards-grid {
+/* ==========================================================================
+   LEADERBOARD TABLE STYLES
+   ========================================================================== */
+
+.leaderboard-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.75rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.leaderboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.lb-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff;
+}
+
+.lb-subtitle {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.lb-champion-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid #f59e0b;
+  padding: 0.35rem 0.8rem;
+  border-radius: 6px;
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.25);
+}
+
+.trophy-icon {
+  font-size: 1.1rem;
+}
+
+.champion-text {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: #fbbf24;
+}
+
+.leaderboard-table-wrapper {
+  overflow-x: auto;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.leaderboard-table th {
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  text-align: left;
+  padding: 0.65rem 0.8rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.leaderboard-table td {
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.leaderboard-table tbody tr {
+  transition: background-color 0.15s;
+}
+
+.leaderboard-table tbody tr:hover {
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.leaderboard-table tr.champion-row {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-weight: 800;
+  font-size: 0.75rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+}
+
+.rank-badge.rank-1 {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #000;
+  border: none;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+.rank-badge.rank-2 {
+  background: linear-gradient(135deg, #e2e8f0, #94a3b8);
+  color: #000;
+  border: none;
+}
+.rank-badge.rank-3 {
+  background: linear-gradient(135deg, #d97706, #92400e);
+  color: #fff;
+  border: none;
+}
+
+.table-strat-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.table-strat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.table-strat-name {
+  font-weight: 700;
+  color: #fff;
+}
+
+.td-mean-val {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--cyan-primary);
+}
+
+.winrate-pill {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+.winrate-pill.high {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid #10b981;
+}
+.winrate-pill.med {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid #0284c7;
+}
+.winrate-pill.base {
+  background: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+  border: 1px solid #ea580c;
+}
+
+/* ==========================================================================
+   6-STRATEGY SUMMARY CARDS GRID
+   ========================================================================== */
+
+.benchmark-cards-grid.six-cards-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1.25rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.75rem;
 }
 
 .benchmark-strategy-card {
@@ -1307,17 +1487,20 @@ body.command-center-theme {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
   display: flex;
   flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.card-random {
-  border-top: 3px solid var(--color-random);
+.benchmark-strategy-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
-.card-checkerboard {
-  border-top: 3px solid var(--color-checkerboard);
-}
-.card-headtohead {
-  border-top: 3px solid #10b981;
-}
+
+.card-random_hunt, .card-random { border-top: 3px solid var(--color-random); }
+.card-checkerboard { border-top: 3px solid var(--color-checkerboard); }
+.card-largest_rect { border-top: 3px solid var(--color-largest-rect); }
+.card-adaptive_stride { border-top: 3px solid var(--color-adaptive-stride); }
+.card-stride4_to_2 { border-top: 3px solid var(--color-stride4-to-2); }
+.card-rect_stride4 { border-top: 3px solid var(--color-rect-stride4); }
 
 .strat-card-header {
   display: flex;
@@ -1331,9 +1514,6 @@ body.command-center-theme {
   height: 12px;
   border-radius: 50%;
 }
-.random-dot { background: var(--color-random); box-shadow: 0 0 10px rgba(249, 115, 22, 0.6); }
-.checkerboard-dot { background: var(--color-checkerboard); box-shadow: 0 0 10px var(--cyan-glow); }
-.h2h-dot { background: #10b981; box-shadow: 0 0 10px rgba(16, 185, 129, 0.6); }
 
 .strat-title {
   font-family: var(--font-display);
@@ -1354,7 +1534,7 @@ body.command-center-theme {
   color: var(--text-muted);
   line-height: 1.4;
   margin-bottom: 1rem;
-  min-height: 48px;
+  min-height: 44px;
 }
 
 .strat-metrics-table {
@@ -1389,9 +1569,6 @@ body.command-center-theme {
   font-weight: 800;
   color: var(--cyan-primary);
 }
-.card-random .metric-row.highlight-metric .metric-val {
-  color: var(--color-random);
-}
 
 .metric-name {
   color: var(--text-dim);
@@ -1401,90 +1578,10 @@ body.command-center-theme {
   color: #fff;
 }
 
-/* Head-to-Head Section */
-.h2h-summary-section {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  margin-top: auto;
-}
+/* ==========================================================================
+   HISTOGRAM & MULTI-STRATEGY LEGEND
+   ========================================================================== */
 
-.h2h-rates-display {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.h2h-player-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.h2h-label {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  margin-bottom: 0.2rem;
-}
-
-.h2h-percent {
-  font-family: var(--font-display);
-  font-size: 2rem;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.checkerboard-color { color: var(--color-checkerboard); }
-.random-color { color: var(--color-random); }
-
-.h2h-subcount {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.h2h-vs-badge {
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-
-.h2h-bar-container {
-  width: 100%;
-  height: 14px;
-  background: var(--bg-panel);
-  border-radius: 7px;
-  overflow: hidden;
-  display: flex;
-  border: 1px solid var(--border-subtle);
-}
-
-.h2h-bar-segment {
-  height: 100%;
-  transition: width 0.4s ease;
-}
-
-.s2-fill {
-  background: linear-gradient(90deg, #0284c7, #38bdf8);
-}
-.s1-fill {
-  background: linear-gradient(90deg, #f97316, #ea580c);
-}
-
-.h2h-speedup-callout {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  text-align: center;
-  background: var(--bg-panel);
-  padding: 0.6rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-}
-
-/* Histogram Section */
 .histogram-section-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -1516,33 +1613,50 @@ body.command-center-theme {
   color: var(--text-dim);
 }
 
-.hist-legend {
+.hist-legend-multi {
   display: flex;
-  gap: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-.legend-item {
+.legend-toggle-pill {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-}
-
-.legend-swatch {
-  width: 16px;
-  height: 10px;
-  border-radius: 2px;
-}
-.swatch-random {
-  background: var(--color-random);
-}
-.swatch-checkerboard {
-  background: var(--color-checkerboard);
-}
-
-.legend-text {
+  gap: 0.45rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  padding: 0.35rem 0.65rem;
+  border-radius: 20px;
+  cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-main);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.legend-toggle-pill:hover {
+  background: var(--bg-panel-elevated);
+  color: #fff;
+}
+
+.legend-toggle-pill.active {
+  border-color: currentColor;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+.legend-toggle-pill.disabled {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
 }
 
 .histogram-chart-wrapper {
@@ -1701,8 +1815,8 @@ body.command-center-theme {
   .battle-center-divider {
     display: none;
   }
-  .benchmark-cards-grid {
-    grid-template-columns: 1fr;
+  .benchmark-cards-grid.six-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -1723,5 +1837,8 @@ body.command-center-theme {
   .playback-controls-row {
     flex-direction: column;
     align-items: stretch;
+  }
+  .benchmark-cards-grid.six-cards-grid {
+    grid-template-columns: 1fr;
   }
 }

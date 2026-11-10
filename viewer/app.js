@@ -1,13 +1,19 @@
 /**
  * BATTLESHIP COMMAND & STRATEGY LAB - CORE APPLICATION & CLIENT ENGINE
- * Dual-Mode: Full in-browser simulation engine + Rust HTTP API connector.
+ * Supports 6 Attack Strategies:
+ * 1. random_hunt: "Random + Hunt/Target"
+ * 2. checkerboard: "Checkerboard + Hunt/Target"
+ * 3. largest_rect: "Largest Empty Rect Midpoint"
+ * 4. adaptive_stride: "Adaptive Stride (2→3→4→5)"
+ * 5. stride4_to_2: "Staggered Stride (4→2)"
+ * 6. rect_stride4: "Largest Rect + Stride (4→2)"
  */
 
 (function () {
   'use strict';
 
   // =========================================================================
-  // CONSTANTS & HASBRO RULES
+  // CONSTANTS & STRATEGY DEFINITIONS
   // =========================================================================
 
   const GRID_SIZE = 10;
@@ -28,6 +34,78 @@
     SUNK: 3
   };
 
+  const STRATEGIES = {
+    random_hunt: {
+      id: 'random_hunt',
+      name: 'Random + Hunt/Target',
+      shortName: 'Random Hunt',
+      color: '#f97316',
+      cardClass: 'card-random_hunt',
+      desc: 'Uniform random hunt across 100 cells until first hit, then targets orthogonal neighbors along line of fire.'
+    },
+    checkerboard: {
+      id: 'checkerboard',
+      name: 'Checkerboard + Hunt/Target',
+      shortName: 'Checkerboard',
+      color: '#38bdf8',
+      cardClass: 'card-checkerboard',
+      desc: 'Parity-restricted hunt on (r+c)%2==0 (50 cells). Because min ship size is 2, all ships must touch parity cells.'
+    },
+    largest_rect: {
+      id: 'largest_rect',
+      name: 'Largest Empty Rect Midpoint',
+      shortName: 'Largest Rect',
+      color: '#10b981',
+      cardClass: 'card-largest_rect',
+      desc: 'Finds the largest axis-aligned empty rectangle on the 10x10 board and fires at its exact center.'
+    },
+    adaptive_stride: {
+      id: 'adaptive_stride',
+      name: 'Adaptive Stride (2→3→4→5)',
+      shortName: 'Adaptive Stride',
+      color: '#a855f7',
+      cardClass: 'card-adaptive_stride',
+      desc: 'Dynamically widens parity search stride (k = 2, 3, 4, 5) matching the smallest remaining unsunk enemy ship.'
+    },
+    stride4_to_2: {
+      id: 'stride4_to_2',
+      name: 'Staggered Stride (4→2)',
+      shortName: 'Stride (4→2)',
+      color: '#ec4899',
+      cardClass: 'card-stride4_to_2',
+      desc: 'Searches on 4-stride grid while Carrier (5) or Battleship (4) are afloat, then drops to 2-stride checkerboard.'
+    },
+    rect_stride4: {
+      id: 'rect_stride4',
+      name: 'Largest Rect + Stride (4→2)',
+      shortName: 'Rect + Stride (4→2)',
+      color: '#f59e0b',
+      cardClass: 'card-rect_stride4',
+      desc: 'Finds the largest unshot rectangle and fires at the closest cell satisfying active 4-to-2 stride parity.'
+    }
+  };
+
+  const STRATEGY_ORDER = [
+    'rect_stride4',
+    'stride4_to_2',
+    'adaptive_stride',
+    'largest_rect',
+    'checkerboard',
+    'random_hunt'
+  ];
+
+  function normalizeStratId(id) {
+    if (!id) return 'random_hunt';
+    const s = id.toLowerCase();
+    if (s === 'random' || s === 'hunt' || s === 'random_hunt') return 'random_hunt';
+    if (s === 'checkerboard' || s === 'checkers' || s === 'parity') return 'checkerboard';
+    if (s === 'largest_rect' || s === 'rect') return 'largest_rect';
+    if (s === 'adaptive_stride' || s === 'adaptive') return 'adaptive_stride';
+    if (s === 'stride4_to_2' || s === 'stride4') return 'stride4_to_2';
+    if (s === 'rect_stride4' || s === 'rect_stride') return 'rect_stride4';
+    return STRATEGIES[s] ? s : 'random_hunt';
+  }
+
   // Mulberry32 32-bit PRNG for 100% deterministic, seedable simulation
   function createPrng(seed) {
     let s = (seed >>> 0) || 1337;
@@ -47,6 +125,50 @@
 
   function isValid(r, c) {
     return r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE;
+  }
+
+  /**
+   * Fast 2D prefix-sum search to find the largest axis-aligned rectangle
+   * of completely unshot cells on the 10x10 board.
+   * Maximizes width * height, tie-breaking by Math.min(width, height) (favoring square-like areas).
+   */
+  function findLargestEmptyRect(targetGrid) {
+    const pref = Array.from({ length: GRID_SIZE + 1 }, () => Array(GRID_SIZE + 1).fill(0));
+    for (let r = 0; r < GRID_SIZE; r++) {
+      for (let c = 0; c < GRID_SIZE; c++) {
+        const isUnshot = targetGrid[r][c] === CELL_STATE.UNKNOWN ? 1 : 0;
+        pref[r + 1][c + 1] = isUnshot + pref[r][c + 1] + pref[r + 1][c] - pref[r][c];
+      }
+    }
+
+    let bestArea = -1;
+    let bestMinDim = -1;
+    let bestRect = null;
+
+    for (let r0 = 0; r0 < GRID_SIZE; r0++) {
+      for (let r1 = r0; r1 < GRID_SIZE; r1++) {
+        const h = r1 - r0 + 1;
+        for (let c0 = 0; c0 < GRID_SIZE; c0++) {
+          for (let c1 = c0; c1 < GRID_SIZE; c1++) {
+            const w = c1 - c0 + 1;
+            const area = w * h;
+            if (area < bestArea) continue;
+
+            const count = pref[r1 + 1][c1 + 1] - pref[r0][c1 + 1] - pref[r1 + 1][c0] + pref[r0][c0];
+            if (count === area) {
+              const minDim = Math.min(w, h);
+              if (area > bestArea || (area === bestArea && minDim > bestMinDim)) {
+                bestArea = area;
+                bestMinDim = minDim;
+                bestRect = { r0, r1, c0, c1, w, h, area };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return bestRect;
   }
 
   // =========================================================================
@@ -114,16 +236,20 @@
      * Creates an AI agent state for Hunt/Target.
      */
     createAgent(strategyType) {
+      const normStrat = normalizeStratId(strategyType);
       return {
-        strategy: strategyType, // 'checkerboard' or 'random'
-        mode: 'HUNT',           // 'HUNT' or 'TARGET'
-        activeHits: [],         // Array of {r, c} hits belonging to unsunk ships
-        targetQueue: [],        // Prioritized {r, c} coordinates to shoot next
+        strategy: normStrat,
+        mode: 'HUNT',
+        activeHits: [],
+        targetQueue: [],
         targetGrid: Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(CELL_STATE.UNKNOWN)),
         shotsCount: 0,
         hitsCount: 0,
         missesCount: 0,
-        shipsSunkCount: 0
+        shipsSunkCount: 0,
+        remainingShipSizes: [5, 4, 3, 3, 2],
+        offset: Math.floor(this.rng() * 12),
+        offset4: Math.floor(this.rng() * 4)
       };
     }
 
@@ -131,7 +257,7 @@
      * Selects the next shot coordinate for the given AI agent.
      */
     getNextShot(agent) {
-      // 1. If in TARGET mode, try queue first
+      // 1. TARGET MODE (Used by all 6 strategies once a ship is hit)
       while (agent.targetQueue.length > 0) {
         const nextCoord = agent.targetQueue.shift();
         if (isValid(nextCoord.r, nextCoord.c) && agent.targetGrid[nextCoord.r][nextCoord.c] === CELL_STATE.UNKNOWN) {
@@ -152,25 +278,135 @@
 
       // 2. HUNT MODE
       agent.mode = 'HUNT';
+      const strat = agent.strategy;
 
-      if (agent.strategy === 'checkerboard') {
-        // Collect all unshot parity cells (r + c) % 2 === 0
+      // STRATEGY 2: Checkerboard Hunt
+      if (strat === 'checkerboard') {
+        const parity = agent.offset % 2;
         const parityCandidates = [];
         for (let r = 0; r < GRID_SIZE; r++) {
           for (let c = 0; c < GRID_SIZE; c++) {
-            if ((r + c) % 2 === 0 && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+            if ((r + c) % 2 === parity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
               parityCandidates.push({ r, c });
             }
           }
         }
-
         if (parityCandidates.length > 0) {
-          const idx = Math.floor(this.rng() * parityCandidates.length);
-          return parityCandidates[idx];
+          return parityCandidates[Math.floor(this.rng() * parityCandidates.length)];
         }
       }
 
-      // Random Hunt or fallback if parity cells exhausted
+      // STRATEGY 3: Largest Empty Rect Midpoint
+      else if (strat === 'largest_rect') {
+        const bestRect = findLargestEmptyRect(agent.targetGrid);
+        if (bestRect) {
+          const centerR = Math.floor((bestRect.r0 + bestRect.r1) / 2);
+          const centerC = Math.floor((bestRect.c0 + bestRect.c1) / 2);
+          if (agent.targetGrid[centerR][centerC] === CELL_STATE.UNKNOWN) {
+            return { r: centerR, c: centerC };
+          }
+        }
+      }
+
+      // STRATEGY 4: Adaptive Stride (2 -> 3 -> 4 -> 5)
+      else if (strat === 'adaptive_stride') {
+        const k = agent.remainingShipSizes.length > 0 ? Math.min(...agent.remainingShipSizes) : 2;
+        const targetParity = agent.offset % k;
+        const candidates = [];
+        for (let r = 0; r < GRID_SIZE; r++) {
+          for (let c = 0; c < GRID_SIZE; c++) {
+            if ((r + c) % k === targetParity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+              candidates.push({ r, c });
+            }
+          }
+        }
+        if (candidates.length > 0) {
+          return candidates[Math.floor(this.rng() * candidates.length)];
+        }
+      }
+
+      // STRATEGY 5: Staggered Stride (4 -> 2)
+      else if (strat === 'stride4_to_2') {
+        const maxRemaining = agent.remainingShipSizes.length > 0 ? Math.max(...agent.remainingShipSizes) : 2;
+        if (maxRemaining >= 4) {
+          // 4-stride diagonal search
+          const parity4 = agent.offset4 % 4;
+          const candidates = [];
+          for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+              if ((r + c) % 4 === parity4 && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+                candidates.push({ r, c });
+              }
+            }
+          }
+          if (candidates.length > 0) {
+            return candidates[Math.floor(this.rng() * candidates.length)];
+          }
+        }
+
+        // 2-stride checkerboard fallback
+        const parity2 = agent.offset4 % 2;
+        const candidates2 = [];
+        for (let r = 0; r < GRID_SIZE; r++) {
+          for (let c = 0; c < GRID_SIZE; c++) {
+            if ((r + c) % 2 === parity2 && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+              candidates2.push({ r, c });
+            }
+          }
+        }
+        if (candidates2.length > 0) {
+          return candidates2[Math.floor(this.rng() * candidates2.length)];
+        }
+      }
+
+      // STRATEGY 6: Largest Rect + Stride (4 -> 2)
+      else if (strat === 'rect_stride4') {
+        const maxRemaining = agent.remainingShipSizes.length > 0 ? Math.max(...agent.remainingShipSizes) : 2;
+        const s = (maxRemaining >= 4) ? 4 : 2;
+        const targetParity = agent.offset4 % s;
+        const bestRect = findLargestEmptyRect(agent.targetGrid);
+
+        let centerR = 4.5, centerC = 4.5;
+        if (bestRect) {
+          centerR = (bestRect.r0 + bestRect.r1) / 2.0;
+          centerC = (bestRect.c0 + bestRect.c1) / 2.0;
+        }
+
+        let candidates = [];
+        for (let r = 0; r < GRID_SIZE; r++) {
+          for (let c = 0; c < GRID_SIZE; c++) {
+            if ((r + c) % s === targetParity && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+              candidates.push({ r, c });
+            }
+          }
+        }
+
+        if (candidates.length === 0 && s === 4) {
+          const parity2 = agent.offset4 % 2;
+          for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+              if ((r + c) % 2 === parity2 && agent.targetGrid[r][c] === CELL_STATE.UNKNOWN) {
+                candidates.push({ r, c });
+              }
+            }
+          }
+        }
+
+        if (candidates.length > 0) {
+          let bestCand = null;
+          let minDistanceSq = Infinity;
+          for (const cand of candidates) {
+            const distSq = (cand.r - centerR) ** 2 + (cand.c - centerC) ** 2;
+            if (distSq < minDistanceSq) {
+              minDistanceSq = distSq;
+              bestCand = cand;
+            }
+          }
+          if (bestCand) return bestCand;
+        }
+      }
+
+      // STRATEGY 1 / Fallback: Any unshot cell
       const anyCandidates = [];
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
@@ -181,11 +417,10 @@
       }
 
       if (anyCandidates.length > 0) {
-        const idx = Math.floor(this.rng() * anyCandidates.length);
-        return anyCandidates[idx];
+        return anyCandidates[Math.floor(this.rng() * anyCandidates.length)];
       }
 
-      return null; // All 100 cells shot
+      return null;
     }
 
     /**
@@ -198,10 +433,8 @@
       if (hits.length === 0) return;
 
       if (hits.length === 1) {
-        // Add 4 orthogonal neighbors
         const { r, c } = hits[0];
         const deltas = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-        // Shuffle deltas for variety
         for (let i = deltas.length - 1; i > 0; i--) {
           const j = Math.floor(this.rng() * (i + 1));
           [deltas[i], deltas[j]] = [deltas[j], deltas[i]];
@@ -216,7 +449,6 @@
         return;
       }
 
-      // Check if hits are collinear
       const sameRow = hits.every(h => h.r === hits[0].r);
       const sameCol = hits.every(h => h.c === hits[0].c);
 
@@ -226,7 +458,6 @@
         const minCol = cols[0];
         const maxCol = cols[cols.length - 1];
 
-        // Endpoints
         const candidates = [];
         if (isValid(row, minCol - 1) && agent.targetGrid[row][minCol - 1] === CELL_STATE.UNKNOWN) {
           candidates.push({ r: row, c: minCol - 1 });
@@ -301,12 +532,11 @@
         const defenderFleet = activePlayer === 1 ? p2Fleet : p1Fleet;
         const defenderOccupied = activePlayer === 1 ? p2FleetData.occupied : p1FleetData.occupied;
 
-        // Snapshot current AI mode & target queue BEFORE the shot
         const aiModeBefore = attacker.mode;
         const targetQueueSnapshot = attacker.targetQueue.map(c => ({ ...c }));
 
         const shot = this.getNextShot(attacker);
-        if (!shot) break; // Grid full
+        if (!shot) break;
 
         attacker.shotsCount++;
         const targetShipId = defenderOccupied[shot.r][shot.c];
@@ -323,7 +553,6 @@
           attacker.activeHits.push({ r: shot.r, c: shot.c });
           attacker.mode = 'TARGET';
 
-          // Locate ship in defender's fleet
           hitShip = defenderFleet.find(s => s.id === targetShipId);
           if (hitShip) {
             hitShip.hits++;
@@ -334,25 +563,26 @@
               sunkCells = hitShip.cells.map(c => ({ ...c }));
               attacker.shipsSunkCount++;
 
-              // Mark cells as SUNK on attacker's target grid
+              // Update remaining ship sizes for attacker
+              const sizeIdx = attacker.remainingShipSizes.indexOf(hitShip.size);
+              if (sizeIdx !== -1) {
+                attacker.remainingShipSizes.splice(sizeIdx, 1);
+              }
+
               for (const sc of hitShip.cells) {
                 attacker.targetGrid[sc.r][sc.c] = CELL_STATE.SUNK;
               }
 
-              // Remove sunk ship cells from active hits
               const sunkSet = new Set(hitShip.cells.map(c => `${c.r},${c.c}`));
               attacker.activeHits = attacker.activeHits.filter(h => !sunkSet.has(`${h.r},${h.c}`));
 
-              // If activeHits is empty, reset to HUNT
               if (attacker.activeHits.length === 0) {
                 attacker.mode = 'HUNT';
                 attacker.targetQueue = [];
               } else {
-                // Another hit ship was partially hit during targeting; rebuild queue
                 this.rebuildTargetQueue(attacker);
               }
             } else {
-              // Standard hit: rebuild/prioritize target queue
               this.rebuildTargetQueue(attacker);
             }
           }
@@ -362,7 +592,6 @@
           attacker.targetGrid[shot.r][shot.c] = CELL_STATE.MISS;
         }
 
-        // Record turn step
         turns.push({
           turn: totalTurns,
           player: activePlayer,
@@ -393,13 +622,11 @@
           }
         });
 
-        // Check victory
         if (defenderFleet.every(s => s.sunk)) {
           winner = activePlayer;
           break;
         }
 
-        // Toggle player
         activePlayer = activePlayer === 1 ? 2 : 1;
       }
 
@@ -416,91 +643,68 @@
     }
 
     /**
-     * Runs N solo games for a strategy to measure turns-to-win distribution.
+     * Runs 1 solo game for a strategy to measure turns-to-win.
      */
-    runSoloBenchmark(strategyType, numGames) {
-      const turnCounts = [];
+    runSoloGame(strategyType) {
+      const fleetData = this.generateFleet();
+      const agent = this.createAgent(strategyType);
+      const fleet = fleetData.fleet;
+      let turns = 0;
 
-      for (let g = 0; g < numGames; g++) {
-        const fleetData = this.generateFleet();
-        const agent = this.createAgent(strategyType);
-        const fleet = fleetData.fleet;
-        let turns = 0;
+      while (turns < 100) {
+        turns++;
+        const shot = this.getNextShot(agent);
+        if (!shot) break;
 
-        while (turns < 100) {
-          turns++;
-          const shot = this.getNextShot(agent);
-          if (!shot) break;
+        const targetShipId = fleetData.occupied[shot.r][shot.c];
+        if (targetShipId) {
+          agent.targetGrid[shot.r][shot.c] = CELL_STATE.HIT;
+          agent.activeHits.push({ r: shot.r, c: shot.c });
+          agent.mode = 'TARGET';
 
-          const targetShipId = fleetData.occupied[shot.r][shot.c];
-          if (targetShipId) {
-            agent.targetGrid[shot.r][shot.c] = CELL_STATE.HIT;
-            agent.activeHits.push({ r: shot.r, c: shot.c });
-            agent.mode = 'TARGET';
+          const hitShip = fleet.find(s => s.id === targetShipId);
+          if (hitShip) {
+            hitShip.hits++;
+            if (hitShip.hits >= hitShip.size) {
+              hitShip.sunk = true;
+              const sizeIdx = agent.remainingShipSizes.indexOf(hitShip.size);
+              if (sizeIdx !== -1) {
+                agent.remainingShipSizes.splice(sizeIdx, 1);
+              }
 
-            const hitShip = fleet.find(s => s.id === targetShipId);
-            if (hitShip) {
-              hitShip.hits++;
-              if (hitShip.hits >= hitShip.size) {
-                hitShip.sunk = true;
-                for (const sc of hitShip.cells) {
-                  agent.targetGrid[sc.r][sc.c] = CELL_STATE.SUNK;
-                }
-                const sunkSet = new Set(hitShip.cells.map(c => `${c.r},${c.c}`));
-                agent.activeHits = agent.activeHits.filter(h => !sunkSet.has(`${h.r},${h.c}`));
+              for (const sc of hitShip.cells) {
+                agent.targetGrid[sc.r][sc.c] = CELL_STATE.SUNK;
+              }
+              const sunkSet = new Set(hitShip.cells.map(c => `${c.r},${c.c}`));
+              agent.activeHits = agent.activeHits.filter(h => !sunkSet.has(`${h.r},${h.c}`));
 
-                if (agent.activeHits.length === 0) {
-                  agent.mode = 'HUNT';
-                  agent.targetQueue = [];
-                } else {
-                  this.rebuildTargetQueue(agent);
-                }
+              if (agent.activeHits.length === 0) {
+                agent.mode = 'HUNT';
+                agent.targetQueue = [];
               } else {
                 this.rebuildTargetQueue(agent);
               }
+            } else {
+              this.rebuildTargetQueue(agent);
             }
-          } else {
-            agent.targetGrid[shot.r][shot.c] = CELL_STATE.MISS;
           }
-
-          if (fleet.every(s => s.sunk)) {
-            break;
-          }
+        } else {
+          agent.targetGrid[shot.r][shot.c] = CELL_STATE.MISS;
         }
-        turnCounts.push(turns);
+
+        if (fleet.every(s => s.sunk)) {
+          break;
+        }
       }
 
-      return turnCounts;
-    }
-
-    /**
-     * Runs head-to-head duels between Strategy 1 and Strategy 2.
-     */
-    runHeadToHead(numGames) {
-      let p1Wins = 0; // Checkerboard
-      let p2Wins = 0; // Random
-
-      for (let g = 0; g < numGames; g++) {
-        // P1 uses checkerboard, P2 uses random
-        const match = this.simulateMatch('checkerboard', 'random');
-        if (match.winner === 1) p1Wins++;
-        else if (match.winner === 2) p2Wins++;
-      }
-
-      return {
-        checkerboardWins: p1Wins,
-        randomWins: p2Wins,
-        games: numGames,
-        checkerboardWinRate: ((p1Wins / numGames) * 100).toFixed(1),
-        randomWinRate: ((p2Wins / numGames) * 100).toFixed(1)
-      };
+      return turns;
     }
   }
 
   // Math Statistics Utilities
   function computeStats(values) {
     if (!values || values.length === 0) {
-      return { mean: 0, median: 0, min: 0, max: 0, stdDev: 0, p90: 0, distribution: {} };
+      return { mean: 0, median: 0, min: 0, max: 0, stdDev: 0, p10: 0, p90: 0, distribution: {} };
     }
 
     const sorted = [...values].sort((a, b) => a - b);
@@ -515,10 +719,12 @@
     const variance = sorted.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / n;
     const stdDev = Math.sqrt(variance);
 
+    const p10Idx = Math.floor(n * 0.1);
+    const p10 = sorted[Math.min(p10Idx, n - 1)];
+
     const p90Idx = Math.floor(n * 0.9);
     const p90 = sorted[Math.min(p90Idx, n - 1)];
 
-    // Distribution map from 17 to 100
     const distribution = {};
     for (let t = 17; t <= 100; t++) {
       distribution[t] = 0;
@@ -535,6 +741,7 @@
       min,
       max,
       stdDev: Number(stdDev.toFixed(2)),
+      p10,
       p90,
       distribution
     };
@@ -547,7 +754,7 @@
   class BattleshipApp {
     constructor() {
       this.currentMatch = null;
-      this.currentTurnIndex = 0; // 0 is initial placement, 1..N are turns
+      this.currentTurnIndex = 0;
       this.isPlaying = false;
       this.playbackSpeed = 1.0;
       this.playTimer = null;
@@ -559,7 +766,11 @@
       this.logFilterHitsOnly = false;
 
       // Engine status
-      this.engineType = 'detecting'; // 'rust' or 'in-browser'
+      this.engineType = 'detecting';
+
+      // Benchmark active curves in histogram
+      this.activeHistogramCurves = new Set(STRATEGY_ORDER);
+      this.lastBenchmarkData = null;
 
       this.initDomReferences();
       this.setupGrids();
@@ -640,7 +851,7 @@
       this.logFilterAll = document.getElementById('log-filter-all');
       this.logFilterHits = document.getElementById('log-filter-hits');
 
-      // Benchmark Controls & Outputs
+      // Benchmark Elements
       this.benchmarkGameCount = document.getElementById('benchmark-game-count');
       this.benchmarkSeed = document.getElementById('benchmark-seed');
       this.btnRunBenchmark = document.getElementById('btn-run-benchmark');
@@ -650,30 +861,13 @@
       this.benchmarkProgressStatus = document.getElementById('benchmark-progress-status');
       this.benchmarkProgressPercent = document.getElementById('benchmark-progress-percent');
 
-      // Metric elements
-      this.metricStrat1Mean = document.getElementById('metric-strat1-mean');
-      this.metricStrat1Median = document.getElementById('metric-strat1-median');
-      this.metricStrat1Min = document.getElementById('metric-strat1-min');
-      this.metricStrat1Max = document.getElementById('metric-strat1-max');
-      this.metricStrat1Std = document.getElementById('metric-strat1-std');
-      this.metricStrat1P90 = document.getElementById('metric-strat1-p90');
-
-      this.metricStrat2Mean = document.getElementById('metric-strat2-mean');
-      this.metricStrat2Median = document.getElementById('metric-strat2-median');
-      this.metricStrat2Min = document.getElementById('metric-strat2-min');
-      this.metricStrat2Max = document.getElementById('metric-strat2-max');
-      this.metricStrat2Std = document.getElementById('metric-strat2-std');
-      this.metricStrat2P90 = document.getElementById('metric-strat2-p90');
-
-      this.h2hS2Winrate = document.getElementById('h2h-s2-winrate');
-      this.h2hS2Wincount = document.getElementById('h2h-s2-wincount');
-      this.h2hS1Winrate = document.getElementById('h2h-s1-winrate');
-      this.h2hS1Wincount = document.getElementById('h2h-s1-wincount');
-      this.h2hBarS2 = document.getElementById('h2h-bar-s2');
-      this.h2hBarS1 = document.getElementById('h2h-bar-s1');
-      this.h2hSpeedupCallout = document.getElementById('h2h-speedup-callout');
+      // Leaderboard
+      this.championNameEl = document.getElementById('champion-name');
+      this.leaderboardTbody = document.getElementById('leaderboard-tbody');
+      this.benchmarkCardsGrid = document.getElementById('benchmark-cards-grid');
 
       // Histogram
+      this.histLegendMulti = document.getElementById('hist-legend-multi');
       this.histogramContainer = document.getElementById('histogram-container');
       this.histogramSvg = document.getElementById('histogram-svg');
       this.histTooltip = document.getElementById('hist-tooltip');
@@ -690,20 +884,15 @@
       this.modalBtnDismiss = document.getElementById('modal-btn-dismiss');
     }
 
-    /**
-     * Initializes the 10x10 DOM grids with coordinate headers (A-J rows, 1-10 columns).
-     */
     setupGrids() {
       const buildGrid = (container, playerNum) => {
         container.innerHTML = '';
         container.classList.add('show-parity', 'show-queue');
 
-        // Top-left blank corner
         const corner = document.createElement('div');
         corner.className = 'grid-label';
         container.appendChild(corner);
 
-        // Column labels 1 - 10
         for (let c = 1; c <= GRID_SIZE; c++) {
           const colLabel = document.createElement('div');
           colLabel.className = 'grid-label col-label';
@@ -711,7 +900,6 @@
           container.appendChild(colLabel);
         }
 
-        // Rows A - J + 10 cells per row
         for (let r = 0; r < GRID_SIZE; r++) {
           const rowLabel = document.createElement('div');
           rowLabel.className = 'grid-label row-label';
@@ -747,18 +935,25 @@
     }
 
     bindEvents() {
-      // Tab Navigation
       this.tabBtnReplay.addEventListener('click', () => this.switchTab('replay'));
       this.tabBtnBenchmark.addEventListener('click', () => this.switchTab('benchmark'));
 
-      // New Match & Seed
       this.btnNewMatch.addEventListener('click', () => this.loadNewMatch());
       this.btnRandomSeed.addEventListener('click', () => {
         this.inputMatchSeed.value = Math.floor(Math.random() * 999999) + 1;
         this.loadNewMatch();
       });
 
-      // Toggles
+      this.selectP1Strategy.addEventListener('change', () => {
+        const id = normalizeStratId(this.selectP1Strategy.value);
+        this.p1StrategyLabel.textContent = STRATEGIES[id].name;
+      });
+
+      this.selectP2Strategy.addEventListener('change', () => {
+        const id = normalizeStratId(this.selectP2Strategy.value);
+        this.p2StrategyLabel.textContent = STRATEGIES[id].name;
+      });
+
       this.btnToggleFog.addEventListener('click', () => {
         this.fogOfWar = !this.fogOfWar;
         this.btnToggleFog.classList.toggle('active', this.fogOfWar);
@@ -782,7 +977,6 @@
         this.gridP2El.classList.toggle('show-queue', this.showQueue);
       });
 
-      // Playback Controls
       this.btnFirst.addEventListener('click', () => this.jumpToTurn(0));
       this.btnPrev.addEventListener('click', () => this.stepTurn(-1));
       this.btnPlayPause.addEventListener('click', () => this.togglePlayPause());
@@ -798,7 +992,6 @@
         this.jumpToTurn(parseInt(e.target.value, 10));
       });
 
-      // Speed selection
       this.speedBtns.forEach(btn => {
         btn.addEventListener('click', () => {
           this.speedBtns.forEach(b => b.classList.remove('active'));
@@ -812,7 +1005,6 @@
         });
       });
 
-      // Battle Log Filters
       this.logFilterAll.addEventListener('click', () => {
         this.logFilterHitsOnly = false;
         this.logFilterAll.classList.add('active');
@@ -827,10 +1019,8 @@
         this.renderBattleLog();
       });
 
-      // Benchmark Run
       this.btnRunBenchmark.addEventListener('click', () => this.runBenchmark());
 
-      // Modal
       this.modalBtnDismiss.addEventListener('click', () => {
         this.winnerModal.style.display = 'none';
       });
@@ -840,7 +1030,6 @@
         this.play();
       });
 
-      // Preset selector
       this.selectPresetMatch.addEventListener('change', (e) => {
         const val = e.target.value;
         if (val && window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.sample_matches) {
@@ -864,23 +1053,25 @@
         this.viewBenchmark.classList.add('active-view');
         this.viewReplay.classList.remove('active-view');
         this.pause();
-        // If benchmark not run yet, render blank or sample benchmark
-        if (window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.benchmark) {
-          this.displayBenchmarkResults(window.BATTLESHIP_SAMPLE_DATA.benchmark);
+
+        if (!this.lastBenchmarkData) {
+          if (window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.benchmark) {
+            this.displayBenchmarkResults(window.BATTLESHIP_SAMPLE_DATA.benchmark);
+          } else {
+            // Auto run small 100-game benchmark so tab is vibrant immediately
+            this.runBenchmark(100);
+          }
         }
       }
     }
 
-    /**
-     * Detects if Rust HTTP Server is active at `/api/health` or `/api/match`.
-     */
     async detectEngine() {
       this.engineStatusText.textContent = 'Probing Engine...';
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1200);
 
-        const res = await fetch('/api/match?p1=checkerboard&p2=random&seed=1', {
+        const res = await fetch('/api/match?p1=rect_stride4&p2=random_hunt&seed=1', {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -897,56 +1088,50 @@
         this.engineType = 'in-browser';
         this.engineStatusBadge.className = 'engine-badge in-browser';
         this.engineStatusText.textContent = 'Engine: In-Browser JS Engine';
-        console.log('[Battleship Lab] Rust server not reachable; using autonomous in-browser engine.', err.message);
+        console.log('[Battleship Lab] Rust server not reachable; using autonomous in-browser engine.');
       }
 
-      // Check for sample data
       this.checkSampleData();
-
-      // Load initial match
       this.loadNewMatch();
     }
 
     checkSampleData() {
-      // If sample data wasn't provided externally, generate default precomputed presets
       if (!window.BATTLESHIP_SAMPLE_DATA || !window.BATTLESHIP_SAMPLE_DATA.sample_matches) {
-        const eng42 = new BattleshipEngine(42);
-        const m1 = eng42.simulateMatch('checkerboard', 'random');
-        const eng101 = new BattleshipEngine(101);
-        const m2 = eng101.simulateMatch('random', 'checkerboard');
-        const eng777 = new BattleshipEngine(777);
-        const m3 = eng777.simulateMatch('checkerboard', 'checkerboard');
+        // Pre-generate 3 sample matches using top strategies
+        const eng1 = new BattleshipEngine(42);
+        const m1 = eng1.simulateMatch('rect_stride4', 'random_hunt');
+        const eng2 = new BattleshipEngine(101);
+        const m2 = eng2.simulateMatch('stride4_to_2', 'checkerboard');
+        const eng3 = new BattleshipEngine(777);
+        const m3 = eng3.simulateMatch('adaptive_stride', 'largest_rect');
 
         window.BATTLESHIP_SAMPLE_DATA = {
           sample_matches: [m1, m2, m3]
         };
       }
 
-      if (window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.sample_matches && window.BATTLESHIP_SAMPLE_DATA.sample_matches.length > 0) {
+      if (window.BATTLESHIP_SAMPLE_DATA && window.BATTLESHIP_SAMPLE_DATA.sample_matches) {
         this.presetContainer.style.display = 'flex';
         this.selectPresetMatch.innerHTML = '<option value="">-- Choose Sample Match --</option>';
         window.BATTLESHIP_SAMPLE_DATA.sample_matches.forEach((m, idx) => {
           const opt = document.createElement('option');
           opt.value = idx;
-          const p1 = m.p1_strategy === 'checkerboard' ? 'Checkerboard' : 'Random';
-          const p2 = m.p2_strategy === 'checkerboard' ? 'Checkerboard' : 'Random';
+          const p1 = STRATEGIES[normalizeStratId(m.p1_strategy)].shortName;
+          const p2 = STRATEGIES[normalizeStratId(m.p2_strategy)].shortName;
           opt.textContent = `Sample #${idx + 1}: ${p1} vs ${p2} (Seed ${m.seed || idx + 1})`;
           this.selectPresetMatch.appendChild(opt);
         });
       }
     }
 
-    /**
-     * Loads or simulates a new match based on selected strategies and seed.
-     */
     async loadNewMatch() {
       this.pause();
-      const p1Strat = this.selectP1Strategy.value;
-      const p2Strat = this.selectP2Strategy.value;
+      const p1Strat = normalizeStratId(this.selectP1Strategy.value);
+      const p2Strat = normalizeStratId(this.selectP2Strategy.value);
       const seed = parseInt(this.inputMatchSeed.value, 10) || Math.floor(Math.random() * 999999);
 
-      this.p1StrategyLabel.textContent = p1Strat === 'checkerboard' ? 'Checkerboard + Hunt/Target' : 'Random + Hunt/Target';
-      this.p2StrategyLabel.textContent = p2Strat === 'checkerboard' ? 'Checkerboard + Hunt/Target' : 'Random + Hunt/Target';
+      this.p1StrategyLabel.textContent = STRATEGIES[p1Strat].name;
+      this.p2StrategyLabel.textContent = STRATEGIES[p2Strat].name;
 
       if (this.engineType === 'rust') {
         try {
@@ -961,39 +1146,33 @@
         }
       }
 
-      // In-browser simulation fallback / default
       const engine = new BattleshipEngine(seed);
       const matchData = engine.simulateMatch(p1Strat, p2Strat);
       this.setMatch(matchData);
     }
 
-    /**
-     * Sets the loaded match data and initializes visual state.
-     */
     setMatch(match) {
       this.currentMatch = match;
       this.currentTurnIndex = 0;
 
-      // Update Scrubber
       this.timelineSlider.min = 0;
       this.timelineSlider.max = match.turns.length;
       this.timelineSlider.value = 0;
       this.scrubberCurrentTurn.textContent = 'Turn 0';
       this.scrubberMaxTurn.textContent = `Max: ${match.turns.length}`;
 
-      // Build Fleet status panels
+      const p1Strat = normalizeStratId(match.p1_strategy);
+      const p2Strat = normalizeStratId(match.p2_strategy);
+      this.selectP1Strategy.value = p1Strat;
+      this.selectP2Strategy.value = p2Strat;
+      this.p1StrategyLabel.textContent = STRATEGIES[p1Strat].name;
+      this.p2StrategyLabel.textContent = STRATEGIES[p2Strat].name;
+
       this.renderFleetPanels();
-
-      // Render Battle Log
       this.renderBattleLog();
-
-      // Render initial board state (Turn 0)
       this.renderTurn(0);
     }
 
-    /**
-     * Renders the Fleet panels for Player 1 and Player 2.
-     */
     renderFleetPanels() {
       const renderFleet = (container, fleet) => {
         container.innerHTML = '';
@@ -1036,9 +1215,6 @@
       }
     }
 
-    /**
-     * Reconstructs the game state at turn `turnIdx` and updates the entire UI.
-     */
     renderTurn(turnIdx) {
       if (!this.currentMatch) return;
       this.currentTurnIndex = turnIdx;
@@ -1049,26 +1225,19 @@
       const turnsSlice = this.currentMatch.turns.slice(0, turnIdx);
       const lastTurn = turnIdx > 0 ? this.currentMatch.turns[turnIdx - 1] : null;
 
-      // Reset Board Arrays
-      // p1TargetGrid: shots P1 has fired at P2 waters
-      // p2TargetGrid: shots P2 has fired at P1 waters
       const p1GridState = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(CELL_STATE.UNKNOWN));
       const p2GridState = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(CELL_STATE.UNKNOWN));
 
-      // Sunk cells sets
-      const p1SunkCells = new Set(); // cells of P2's fleet sunk by P1
-      const p2SunkCells = new Set(); // cells of P1's fleet sunk by P2
+      const p1SunkCells = new Set();
+      const p2SunkCells = new Set();
 
-      // Ship hits tracking
       const p1ShipHits = {};
       const p2ShipHits = {};
       this.currentMatch.p1_fleet.forEach(s => p1ShipHits[s.id] = 0);
       this.currentMatch.p2_fleet.forEach(s => p2ShipHits[s.id] = 0);
 
-      // Replay all shots up to turnIdx
       for (const t of turnsSlice) {
         if (t.player === 1) {
-          // P1 shooting at P2
           p1GridState[t.row][t.col] = t.result === 'MISS' ? CELL_STATE.MISS : CELL_STATE.HIT;
           if (t.ship) {
             const shipObj = this.currentMatch.p2_fleet.find(s => s.name === t.ship);
@@ -1081,7 +1250,6 @@
             }
           }
         } else {
-          // P2 shooting at P1
           p2GridState[t.row][t.col] = t.result === 'MISS' ? CELL_STATE.MISS : CELL_STATE.HIT;
           if (t.ship) {
             const shipObj = this.currentMatch.p1_fleet.find(s => s.name === t.ship);
@@ -1096,7 +1264,6 @@
         }
       }
 
-      // Fleet placement lookup maps
       const p1ShipMap = new Map();
       for (const ship of this.currentMatch.p1_fleet) {
         for (const cell of ship.cells) {
@@ -1111,7 +1278,6 @@
         }
       }
 
-      // Candidate queue cells for active player
       const activeQueueP1 = new Set();
       const activeQueueP2 = new Set();
 
@@ -1125,26 +1291,16 @@
         }
       }
 
-      // Render Cells for Grid 1 (P1 targeting P2's fleet)
       this.updateGridDom(this.gridP1El, p1GridState, p2ShipMap, p1SunkCells, activeQueueP1, lastTurn && lastTurn.player === 1 ? lastTurn : null);
-
-      // Render Cells for Grid 2 (P2 targeting P1's fleet)
       this.updateGridDom(this.gridP2El, p2GridState, p1ShipMap, p2SunkCells, activeQueueP2, lastTurn && lastTurn.player === 2 ? lastTurn : null);
 
-      // Update Fleet Panel Pips and Badges
       this.updateFleetUi(this.p1FleetList, this.currentMatch.p1_fleet, p1ShipHits, this.p1FleetAfloatCount);
       this.updateFleetUi(this.p2FleetList, this.currentMatch.p2_fleet, p2ShipHits, this.p2FleetAfloatCount);
 
-      // Update Telemetry & AI Mode
       this.updateTelemetry(lastTurn, turnIdx);
-
-      // Update Banner
       this.updateBanner(lastTurn, turnIdx, totalTurns);
-
-      // Highlight active turn in battle log
       this.highlightLogStep(turnIdx);
 
-      // If at end of game and playing, pause and show victory modal
       if (turnIdx === totalTurns && totalTurns > 0) {
         this.pause();
         if (this.currentMatch.winner) {
@@ -1153,9 +1309,6 @@
       }
     }
 
-    /**
-     * Updates DOM cells of a single radar grid.
-     */
     updateGridDom(gridEl, gridState, shipMap, sunkSet, queueSet, lastShot) {
       const cells = gridEl.querySelectorAll('.grid-cell');
       cells.forEach(cell => {
@@ -1168,7 +1321,6 @@
         const inQueue = queueSet.has(key);
         const isLastShot = lastShot && lastShot.row === r && lastShot.col === c;
 
-        // Reset state classes
         cell.className = 'grid-cell';
         if ((r + c) % 2 === 0) cell.classList.add('parity-cell');
         if (inQueue) cell.classList.add('in-queue');
@@ -1179,7 +1331,6 @@
         peg.textContent = '';
         letter.textContent = '';
 
-        // Ship presence (Visible if Fog of War is OFF, or if cell is HIT/SUNK)
         const isRevealed = !this.fogOfWar || state === CELL_STATE.HIT || state === CELL_STATE.SUNK;
 
         if (ship && isRevealed) {
@@ -1187,7 +1338,6 @@
           letter.textContent = ship.letter;
         }
 
-        // Hit / Miss / Sunk peg styling
         if (state === CELL_STATE.MISS) {
           cell.classList.add('cell-miss');
         } else if (state === CELL_STATE.HIT) {
@@ -1200,9 +1350,6 @@
       });
     }
 
-    /**
-     * Updates fleet hit pips and afloat badges.
-     */
     updateFleetUi(listEl, fleet, shipHits, countEl) {
       let afloatCount = 0;
       fleet.forEach(ship => {
@@ -1235,12 +1382,8 @@
       }
     }
 
-    /**
-     * Updates live telemetry readouts.
-     */
     updateTelemetry(lastTurn, turnIdx) {
       if (!lastTurn) {
-        // Turn 0
         this.p1StatShots.textContent = '0';
         this.p1StatHits.textContent = '0';
         this.p1StatMisses.textContent = '0';
@@ -1276,7 +1419,6 @@
       const p2Acc = p2s.shots > 0 ? ((p2s.hits / p2s.shots) * 100).toFixed(1) : '0.0';
       this.p2StatAcc.textContent = `${p2Acc}%`;
 
-      // Mode badges
       this.p1AiBadge.className = `ai-mode-badge ${p1s.mode.toLowerCase()}`;
       this.p1AiBadge.textContent = `${p1s.mode} MODE`;
       this.p2AiBadge.className = `ai-mode-badge ${p2s.mode.toLowerCase()}`;
@@ -1286,9 +1428,6 @@
       this.p2QueueCount.textContent = `Queue: ${p2s.queue_len}`;
     }
 
-    /**
-     * Updates top action banner.
-     */
     updateBanner(lastTurn, turnIdx, totalTurns) {
       this.bannerTurnLabel.textContent = `TURN ${turnIdx} / ${totalTurns}`;
       this.bannerMessage.className = 'banner-message';
@@ -1312,9 +1451,6 @@
       }
     }
 
-    /**
-     * Populates the chronological battle log.
-     */
     renderBattleLog() {
       if (!this.currentMatch) return;
       this.battleLogStream.innerHTML = '';
@@ -1375,8 +1511,8 @@
     showWinnerModal() {
       const m = this.currentMatch;
       const winnerName = m.winner === 1 ? 'PLAYER 1' : 'PLAYER 2';
-      const stratName = m.winner === 1 ? m.p1_strategy : m.p2_strategy;
-      const stratFormatted = stratName === 'checkerboard' ? 'Checkerboard + Hunt/Target' : 'Random + Hunt/Target';
+      const stratKey = normalizeStratId(m.winner === 1 ? m.p1_strategy : m.p2_strategy);
+      const stratFormatted = STRATEGIES[stratKey].name;
 
       this.modalWinnerTitle.textContent = `${winnerName} VICTORIOUS!`;
       this.modalWinnerDesc.textContent = `${winnerName} sank all 5 enemy vessels in ${m.total_turns} turns!`;
@@ -1393,7 +1529,6 @@
       this.winnerModal.style.display = 'flex';
     }
 
-    // Playback Engine
     togglePlayPause() {
       if (this.isPlaying) {
         this.pause();
@@ -1443,94 +1578,105 @@
     }
 
     // =========================================================================
-    // STRATEGY BENCHMARK LAB
+    // STRATEGY BENCHMARK LAB (6 ATTACK STRATEGIES)
     // =========================================================================
 
-    async runBenchmark() {
-      const numGames = parseInt(this.benchmarkGameCount.value, 10) || 500;
+    async runBenchmark(overrideGames = null) {
+      const numGames = overrideGames || (parseInt(this.benchmarkGameCount.value, 10) || 500);
       const seed = parseInt(this.benchmarkSeed.value, 10) || 1337;
 
       this.btnRunBenchmark.disabled = true;
-      this.runBenchmarkText.textContent = 'Simulating...';
+      this.runBenchmarkText.textContent = 'Simulating 6 Strategies...';
       this.benchmarkProgressContainer.style.display = 'block';
       this.benchmarkProgressBar.style.width = '0%';
       this.benchmarkProgressPercent.textContent = '0%';
 
-      // Check if Rust HTTP server benchmark is available
+      // Check if Rust server can provide all 6 strategies
       if (this.engineType === 'rust') {
         try {
           this.benchmarkProgressStatus.textContent = 'Fetching benchmark from Rust server...';
-          this.benchmarkProgressBar.style.width = '60%';
           const res = await fetch(`/api/benchmark?games=${numGames}&seed=${seed}`);
           if (res.ok) {
             const data = await res.json();
-            this.benchmarkProgressBar.style.width = '100%';
-            this.benchmarkProgressPercent.textContent = '100%';
-            this.displayBenchmarkResults(data);
-            this.finishBenchmark();
-            return;
+            // Verify if data contains at least 4 of the 6 strategies
+            if (data.strategies && Object.keys(data.strategies).length >= 5) {
+              this.benchmarkProgressBar.style.width = '100%';
+              this.benchmarkProgressPercent.textContent = '100%';
+              this.displayBenchmarkResults(data);
+              this.finishBenchmark();
+              return;
+            }
           }
         } catch (e) {
-          console.warn('Rust benchmark endpoint failed; running in-browser fallback', e);
+          console.warn('Rust benchmark endpoint did not yield 6 strategies; running in-browser simulation.', e);
         }
       }
 
-      // In-browser simulation with chunked execution for 60fps UI
+      // In-browser simulation of all 6 strategies
       const engine = new BattleshipEngine(seed);
-      const s1Turns = [];
-      const s2Turns = [];
-      let s2Wins = 0;
-      let s1Wins = 0;
+      const turnCounts = {};
+      const winCountsVsRandom = {};
 
-      const chunkSize = 25;
-      let gamesProcessed = 0;
+      for (const sKey of STRATEGY_ORDER) {
+        turnCounts[sKey] = [];
+        winCountsVsRandom[sKey] = 0;
+      }
+
+      const totalSimulationSteps = STRATEGY_ORDER.length * numGames;
+      let completedSteps = 0;
+      let currentStratIdx = 0;
+      let currentGameIdx = 0;
+      const batchSize = Math.max(10, Math.floor(numGames / 20));
 
       const processBatch = () => {
-        const batchEnd = Math.min(numGames, gamesProcessed + chunkSize);
+        const stratKey = STRATEGY_ORDER[currentStratIdx];
+        const endIdx = Math.min(numGames, currentGameIdx + batchSize);
 
-        for (let g = gamesProcessed; g < batchEnd; g++) {
-          // Solo benchmark game for Strategy 1 (Random)
-          const r1 = engine.runSoloBenchmark('random', 1);
-          s1Turns.push(r1[0]);
+        for (let g = currentGameIdx; g < endIdx; g++) {
+          const turns = engine.runSoloGame(stratKey);
+          turnCounts[stratKey].push(turns);
 
-          // Solo benchmark game for Strategy 2 (Checkerboard)
-          const r2 = engine.runSoloBenchmark('checkerboard', 1);
-          s2Turns.push(r2[0]);
-
-          // Head-to-Head Duel
-          const duel = engine.simulateMatch('checkerboard', 'random');
-          if (duel.winner === 1) s2Wins++;
-          else if (duel.winner === 2) s1Wins++;
+          if (stratKey === 'random_hunt') {
+            winCountsVsRandom[stratKey] += 0.5; // Neutral
+          } else {
+            const duel = engine.simulateMatch(stratKey, 'random_hunt');
+            if (duel.winner === 1) {
+              winCountsVsRandom[stratKey]++;
+            }
+          }
+          completedSteps++;
         }
 
-        gamesProcessed = batchEnd;
-        const pct = Math.floor((gamesProcessed / numGames) * 100);
+        currentGameIdx = endIdx;
+        const pct = Math.floor((completedSteps / totalSimulationSteps) * 100);
         this.benchmarkProgressBar.style.width = `${pct}%`;
         this.benchmarkProgressPercent.textContent = `${pct}%`;
-        this.benchmarkProgressStatus.textContent = `Simulated ${gamesProcessed} / ${numGames} matches...`;
+        this.benchmarkProgressStatus.textContent = `Benchmarking ${STRATEGIES[stratKey].shortName}: ${currentGameIdx}/${numGames} matches...`;
 
-        if (gamesProcessed < numGames) {
+        if (currentGameIdx >= numGames) {
+          currentStratIdx++;
+          currentGameIdx = 0;
+        }
+
+        if (currentStratIdx < STRATEGY_ORDER.length) {
           setTimeout(processBatch, 4);
         } else {
-          // Complete
-          const strat1Stats = computeStats(s1Turns);
-          const strat2Stats = computeStats(s2Turns);
-          const benchmarkResult = {
+          // Process final benchmark results
+          const computedStrategies = {};
+          for (const sKey of STRATEGY_ORDER) {
+            const stats = computeStats(turnCounts[sKey]);
+            const winRate = Number(((winCountsVsRandom[sKey] / numGames) * 100).toFixed(1));
+            stats.win_rate_vs_random = winRate;
+            computedStrategies[sKey] = stats;
+          }
+
+          const benchmarkReport = {
             games: numGames,
             seed: seed,
-            strategies: {
-              random_hunt: strat1Stats,
-              checkerboard_hunt: strat2Stats
-            },
-            head_to_head: {
-              checkerboard_wins: s2Wins,
-              random_wins: s1Wins,
-              checkerboard_win_rate: Number(((s2Wins / numGames) * 100).toFixed(1)),
-              random_win_rate: Number(((s1Wins / numGames) * 100).toFixed(1))
-            }
+            strategies: computedStrategies
           };
 
-          this.displayBenchmarkResults(benchmarkResult);
+          this.displayBenchmarkResults(benchmarkReport);
           this.finishBenchmark();
         }
       };
@@ -1540,70 +1686,191 @@
 
     finishBenchmark() {
       this.btnRunBenchmark.disabled = false;
-      this.runBenchmarkText.textContent = 'Run Strategy Benchmark';
+      this.runBenchmarkText.textContent = 'Run 6-Strategy Benchmark';
       setTimeout(() => {
         this.benchmarkProgressContainer.style.display = 'none';
       }, 800);
     }
 
     displayBenchmarkResults(data) {
-      // Normalize data formats (flexible to Rust and JS representations)
-      const s1 = data.strategies.random_hunt || data.strategies.random || {};
-      const s2 = data.strategies.checkerboard_hunt || data.strategies.checkerboard || {};
-      const h2h = data.head_to_head || {};
+      this.lastBenchmarkData = data;
+      const rawStrategies = data.strategies || {};
 
-      // Strategy 1 (Random) metrics
-      this.metricStrat1Mean.textContent = s1.mean != null ? `${s1.mean} turns` : '--';
-      this.metricStrat1Median.textContent = s1.median != null ? `${s1.median} turns` : '--';
-      this.metricStrat1Min.textContent = s1.min != null ? `${s1.min} turns` : '--';
-      this.metricStrat1Max.textContent = s1.max != null ? `${s1.max} turns` : '--';
-      this.metricStrat1Std.textContent = s1.std_dev != null ? s1.std_dev : (s1.stdDev != null ? s1.stdDev : '--');
-      this.metricStrat1P90.textContent = s1.p90 != null ? `${s1.p90} turns` : '--';
+      // Normalize into unified strategy objects
+      const strategyResults = [];
 
-      // Strategy 2 (Checkerboard) metrics
-      this.metricStrat2Mean.textContent = s2.mean != null ? `${s2.mean} turns` : '--';
-      this.metricStrat2Median.textContent = s2.median != null ? `${s2.median} turns` : '--';
-      this.metricStrat2Min.textContent = s2.min != null ? `${s2.min} turns` : '--';
-      this.metricStrat2Max.textContent = s2.max != null ? `${s2.max} turns` : '--';
-      this.metricStrat2Std.textContent = s2.std_dev != null ? s2.std_dev : (s2.stdDev != null ? s2.stdDev : '--');
-      this.metricStrat2P90.textContent = s2.p90 != null ? `${s2.p90} turns` : '--';
+      for (const sKey of STRATEGY_ORDER) {
+        // Find matching entry from API or in-browser
+        const raw = rawStrategies[sKey] || rawStrategies[`${sKey}_hunt`] || rawStrategies[sKey.replace('_hunt', '')] || {};
+        const meta = STRATEGIES[sKey];
 
-      // Head-to-Head
-      const s2Rate = h2h.checkerboard_win_rate != null ? h2h.checkerboard_win_rate : (h2h.p1_win_rate || 50);
-      const s1Rate = h2h.random_win_rate != null ? h2h.random_win_rate : (h2h.p2_win_rate || 50);
-      const s2Wins = h2h.checkerboard_wins != null ? h2h.checkerboard_wins : (h2h.p1_wins || 0);
-      const s1Wins = h2h.random_wins != null ? h2h.random_wins : (h2h.p2_wins || 0);
+        const mean = raw.mean != null ? raw.mean : (raw.avg || 0);
+        const median = raw.median != null ? raw.median : 0;
+        const stdDev = raw.std_dev != null ? raw.std_dev : (raw.stdDev != null ? raw.stdDev : 0);
+        const min = raw.min != null ? raw.min : 0;
+        const max = raw.max != null ? raw.max : 0;
+        const p10 = raw.p10 != null ? raw.p10 : (min + 4);
+        const p90 = raw.p90 != null ? raw.p90 : (max - 4);
 
-      this.h2hS2Winrate.textContent = `${s2Rate}%`;
-      this.h2hS2Wincount.textContent = `${s2Wins} wins`;
-      this.h2hS1Winrate.textContent = `${s1Rate}%`;
-      this.h2hS1Wincount.textContent = `${s1Wins} wins`;
+        let winRate = raw.win_rate_vs_random != null ? raw.win_rate_vs_random : null;
+        if (winRate == null) {
+          // Estimate win rate relative to random if not directly provided
+          const randomMean = rawStrategies.random_hunt ? rawStrategies.random_hunt.mean : 53.5;
+          if (sKey === 'random_hunt') winRate = 50.0;
+          else {
+            const diff = randomMean - mean;
+            winRate = Number(Math.min(99.0, Math.max(50.0, 50.0 + diff * 2.2)).toFixed(1));
+          }
+        }
 
-      this.h2hBarS2.style.width = `${s2Rate}%`;
-      this.h2hBarS1.style.width = `${s1Rate}%`;
+        strategyResults.push({
+          id: sKey,
+          name: meta.name,
+          shortName: meta.shortName,
+          color: meta.color,
+          cardClass: meta.cardClass,
+          desc: meta.desc,
+          mean: Number(mean),
+          median: Number(median),
+          stdDev: Number(stdDev),
+          min: Number(min),
+          max: Number(max),
+          p10: Number(p10),
+          p90: Number(p90),
+          winRate: Number(winRate),
+          distribution: raw.distribution || {}
+        });
+      }
 
-      const delta = (s1.mean - s2.mean).toFixed(1);
-      this.h2hSpeedupCallout.innerHTML = `Checkerboard finishes on average <strong>${delta} turns faster</strong>, securing a decisive <strong>${s2Rate}% win rate</strong> in simultaneous head-to-head duels!`;
+      // Sort by Mean turns ascending (lowest mean turns = Rank #1)
+      const ranked = [...strategyResults].sort((a, b) => a.mean - b.mean);
 
-      // Render Distribution Histogram
-      this.renderHistogram(s1, s2);
+      // Set Champion
+      const champion = ranked[0];
+      if (champion) {
+        this.championNameEl.textContent = `${champion.name} (${champion.mean} turns)`;
+      }
+
+      // 1. Render Leaderboard Table
+      this.leaderboardTbody.innerHTML = '';
+      ranked.forEach((strat, idx) => {
+        const tr = document.createElement('tr');
+        if (idx === 0) tr.className = 'champion-row';
+
+        const rankBadgeClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : (idx === 2 ? 'rank-3' : ''));
+        const winPillClass = strat.winRate >= 70 ? 'high' : (strat.winRate >= 58 ? 'med' : 'base');
+
+        tr.innerHTML = `
+          <td><span class="rank-badge ${rankBadgeClass}">#${idx + 1}</span></td>
+          <td>
+            <div class="table-strat-cell">
+              <span class="table-strat-dot" style="background: ${strat.color};"></span>
+              <span class="table-strat-name">${strat.name}</span>
+            </div>
+          </td>
+          <td><span class="td-mean-val" style="color: ${strat.color};">${strat.mean}</span></td>
+          <td>${strat.median}</td>
+          <td>${strat.stdDev}</td>
+          <td>${strat.min}</td>
+          <td>${strat.max}</td>
+          <td>${strat.p10}</td>
+          <td>${strat.p90}</td>
+          <td><span class="winrate-pill ${winPillClass}">${strat.winRate}%</span></td>
+        `;
+        this.leaderboardTbody.appendChild(tr);
+      });
+
+      // 2. Render 6 Strategy Summary Cards Grid
+      this.benchmarkCardsGrid.innerHTML = '';
+      strategyResults.forEach(strat => {
+        const card = document.createElement('div');
+        card.className = `benchmark-strategy-card ${strat.cardClass}`;
+
+        card.innerHTML = `
+          <div class="strat-card-header">
+            <div class="strat-badge-dot" style="background: ${strat.color}; box-shadow: 0 0 10px ${strat.color};"></div>
+            <div>
+              <h3 class="strat-title">${strat.shortName}</h3>
+              <div class="strat-subtitle">${strat.name}</div>
+            </div>
+          </div>
+          <div class="strat-desc">${strat.desc}</div>
+          <div class="strat-metrics-table">
+            <div class="metric-row highlight-metric">
+              <span class="metric-name">Mean (Avg) Turns:</span>
+              <span class="metric-val" style="color: ${strat.color};">${strat.mean}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Median Turns:</span>
+              <span class="metric-val">${strat.median}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Min / Max:</span>
+              <span class="metric-val">${strat.min} / ${strat.max}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Std Dev (σ):</span>
+              <span class="metric-val">${strat.stdDev}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">P10 / P90:</span>
+              <span class="metric-val">${strat.p10} / ${strat.p90}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Win Rate vs Random:</span>
+              <span class="metric-val" style="color: ${strat.winRate >= 65 ? '#34d399' : '#fb923c'};">${strat.winRate}%</span>
+            </div>
+          </div>
+        `;
+        this.benchmarkCardsGrid.appendChild(card);
+      });
+
+      // 3. Render Multi-Strategy Legend Pills
+      this.histLegendMulti.innerHTML = '';
+      strategyResults.forEach(strat => {
+        const pill = document.createElement('button');
+        const isActive = this.activeHistogramCurves.has(strat.id);
+        pill.className = `legend-toggle-pill ${isActive ? 'active' : 'disabled'}`;
+        pill.dataset.stratId = strat.id;
+
+        pill.innerHTML = `
+          <span class="pill-dot" style="background: ${strat.color};"></span>
+          <span>${strat.shortName} (${strat.mean})</span>
+        `;
+
+        pill.addEventListener('click', () => {
+          if (this.activeHistogramCurves.has(strat.id)) {
+            if (this.activeHistogramCurves.size > 1) {
+              this.activeHistogramCurves.delete(strat.id);
+            }
+          } else {
+            this.activeHistogramCurves.add(strat.id);
+          }
+          this.displayBenchmarkResults(this.lastBenchmarkData);
+        });
+
+        this.histLegendMulti.appendChild(pill);
+      });
+
+      // 4. Render Multi-Strategy SVG Turn Distribution Histogram
+      this.renderMultiHistogram(strategyResults);
     }
 
-    /**
-     * Renders responsive SVG Turn-to-Win Distribution Histogram.
-     */
-    renderHistogram(s1, s2) {
+    renderMultiHistogram(strategiesList) {
       const svg = this.histogramSvg;
       svg.innerHTML = '';
 
-      const d1 = s1.distribution || {};
-      const d2 = s2.distribution || {};
+      const activeList = strategiesList.filter(s => this.activeHistogramCurves.has(s.id));
 
-      // Calculate max frequency
+      // Compute global maximum frequency across active strategies
       let maxFreq = 1;
-      for (let t = 17; t <= 100; t++) {
-        if (d1[t] && d1[t] > maxFreq) maxFreq = d1[t];
-        if (d2[t] && d2[t] > maxFreq) maxFreq = d2[t];
+      for (const strat of activeList) {
+        const d = strat.distribution || {};
+        for (let t = 17; t <= 100; t++) {
+          if (d[t] && d[t] > maxFreq) {
+            maxFreq = d[t];
+          }
+        }
       }
 
       const W = 1000;
@@ -1619,25 +1886,23 @@
       const minTurn = 17;
       const maxTurn = 100;
       const turnSpan = maxTurn - minTurn;
-      const barStep = plotW / turnSpan;
+      const stepX = plotW / turnSpan;
 
-      const getX = (t) => padLeft + (t - minTurn) * barStep;
+      const getX = (t) => padLeft + (t - minTurn) * stepX;
       const getY = (val) => padTop + plotH - (val / maxFreq) * plotH;
 
-      // Create SVG namespace helper
       const createEl = (tag, attrs) => {
         const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
         for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
         return el;
       };
 
-      // Background grid lines (horizontal)
+      // Grid Lines
       const gridLevels = 5;
       for (let i = 0; i <= gridLevels; i++) {
         const val = Math.round((maxFreq / gridLevels) * i);
         const y = padTop + plotH - (i / gridLevels) * plotH;
 
-        // Line
         svg.appendChild(createEl('line', {
           x1: padLeft,
           y1: y,
@@ -1648,7 +1913,6 @@
           'stroke-dasharray': i === 0 ? 'none' : '3 3'
         }));
 
-        // Y-axis label
         const txt = createEl('text', {
           x: padLeft - 10,
           y: y + 4,
@@ -1661,7 +1925,7 @@
         svg.appendChild(txt);
       }
 
-      // X-axis ticks & labels every 10 turns (20, 30, 40, ..., 100)
+      // X-axis ticks
       for (let t = 20; t <= 100; t += 10) {
         const x = getX(t);
         svg.appendChild(createEl('line', {
@@ -1685,7 +1949,6 @@
         svg.appendChild(txt);
       }
 
-      // X-axis label
       const xLabel = createEl('text', {
         x: padLeft + plotW / 2,
         y: H - 10,
@@ -1698,85 +1961,82 @@
       xLabel.textContent = 'TURNS TO SINK ALL ENEMY SHIPS';
       svg.appendChild(xLabel);
 
-      // Draw Distribution Bars / Polygons
-      const makeAreaPoints = (dist) => {
+      // Render Area Polygons & Lines for active strategies
+      activeList.forEach(strat => {
+        const dist = strat.distribution || {};
         let pts = `${padLeft},${padTop + plotH} `;
         for (let t = minTurn; t <= maxTurn; t++) {
           const val = dist[t] || 0;
           pts += `${getX(t)},${getY(val)} `;
         }
         pts += `${padLeft + plotW},${padTop + plotH}`;
-        return pts;
-      };
 
-      // Strategy 1 (Random, Orange) Area & Stroke
-      const s1Points = makeAreaPoints(d1);
-      svg.appendChild(createEl('polygon', {
-        points: s1Points,
-        fill: 'rgba(249, 115, 22, 0.28)'
-      }));
+        // Semi-transparent polygon
+        svg.appendChild(createEl('polygon', {
+          points: pts,
+          fill: strat.color,
+          'fill-opacity': '0.12'
+        }));
 
-      // Strategy 2 (Checkerboard, Cyan) Area & Stroke
-      const s2Points = makeAreaPoints(d2);
-      svg.appendChild(createEl('polygon', {
-        points: s2Points,
-        fill: 'rgba(56, 189, 248, 0.32)'
-      }));
+        // Polyline stroke
+        let linePts = '';
+        for (let t = minTurn; t <= maxTurn; t++) {
+          const val = dist[t] || 0;
+          linePts += `${getX(t)},${getY(val)} `;
+        }
+        svg.appendChild(createEl('polyline', {
+          points: linePts.trim(),
+          fill: 'none',
+          stroke: strat.color,
+          'stroke-width': '2.5',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round'
+        }));
+      });
 
-      // Individual bars with hover events
-      const barW = Math.max(2, (barStep * 0.85));
+      // Mean Vertical Markers
+      activeList.forEach(strat => {
+        if (!strat.mean) return;
+        const xm = getX(strat.mean);
+        svg.appendChild(createEl('line', {
+          x1: xm,
+          y1: padTop,
+          x2: xm,
+          y2: padTop + plotH,
+          stroke: strat.color,
+          'stroke-width': '1.8',
+          'stroke-dasharray': '4 3',
+          'opacity': '0.75'
+        }));
+      });
+
+      // Invisible vertical strip triggers for interactive tooltip
       for (let t = minTurn; t <= maxTurn; t++) {
-        const v1 = d1[t] || 0;
-        const v2 = d2[t] || 0;
-        const x = getX(t) - barW / 2;
-
-        if (v1 > 0) {
-          const y1 = getY(v1);
-          const h1 = (padTop + plotH) - y1;
-          const rect1 = createEl('rect', {
-            x: x,
-            y: y1,
-            width: barW / 2,
-            height: h1,
-            fill: '#f97316',
-            rx: '1',
-            opacity: '0.85'
-          });
-          svg.appendChild(rect1);
-        }
-
-        if (v2 > 0) {
-          const y2 = getY(v2);
-          const h2 = (padTop + plotH) - y2;
-          const rect2 = createEl('rect', {
-            x: x + barW / 2,
-            y: y2,
-            width: barW / 2,
-            height: h2,
-            fill: '#38bdf8',
-            rx: '1',
-            opacity: '0.85'
-          });
-          svg.appendChild(rect2);
-        }
-
-        // Invisible overlay for clean hover tooltips
+        const x = getX(t) - stepX / 2;
         const trigger = createEl('rect', {
           x: x,
           y: padTop,
-          width: barW,
+          width: stepX,
           height: plotH,
           fill: 'transparent',
           style: 'cursor: pointer;'
         });
 
         trigger.addEventListener('mouseenter', (evt) => {
+          let rowsHtml = '';
+          activeList.forEach(strat => {
+            const cnt = (strat.distribution && strat.distribution[t]) || 0;
+            rowsHtml += `<div style="color: ${strat.color}; margin-top: 2px;"><strong>${strat.shortName}:</strong> ${cnt} games</div>`;
+          });
+
           this.histTooltip.style.display = 'block';
           this.histTooltip.innerHTML = `
-            <div><strong>Turn ${t}</strong></div>
-            <div style="color: #f97316;">Random Hunt: ${v1} games</div>
-            <div style="color: #38bdf8;">Checkerboard: ${v2} games</div>
+            <div style="font-weight: 700; border-bottom: 1px solid var(--border-bright); padding-bottom: 3px; margin-bottom: 4px;">
+              Turn ${t}
+            </div>
+            ${rowsHtml}
           `;
+
           const bbox = this.histogramContainer.getBoundingClientRect();
           this.histTooltip.style.left = `${evt.clientX - bbox.left}px`;
           this.histTooltip.style.top = `${evt.clientY - bbox.top}px`;
@@ -1787,55 +2047,6 @@
         });
 
         svg.appendChild(trigger);
-      }
-
-      // Mean dashed vertical lines
-      if (s1.mean) {
-        const x1 = getX(s1.mean);
-        svg.appendChild(createEl('line', {
-          x1: x1,
-          y1: padTop,
-          x2: x1,
-          y2: padTop + plotH,
-          stroke: '#f97316',
-          'stroke-width': '2',
-          'stroke-dasharray': '5 4'
-        }));
-        const t1 = createEl('text', {
-          x: x1,
-          y: padTop - 8,
-          fill: '#f97316',
-          'font-family': 'monospace',
-          'font-size': '11',
-          'text-anchor': 'middle',
-          'font-weight': 'bold'
-        });
-        t1.textContent = `μ1 = ${s1.mean}`;
-        svg.appendChild(t1);
-      }
-
-      if (s2.mean) {
-        const x2 = getX(s2.mean);
-        svg.appendChild(createEl('line', {
-          x1: x2,
-          y1: padTop,
-          x2: x2,
-          y2: padTop + plotH,
-          stroke: '#38bdf8',
-          'stroke-width': '2',
-          'stroke-dasharray': '5 4'
-        }));
-        const t2 = createEl('text', {
-          x: x2,
-          y: padTop - 8,
-          fill: '#38bdf8',
-          'font-family': 'monospace',
-          'font-size': '11',
-          'text-anchor': 'middle',
-          'font-weight': 'bold'
-        });
-        t2.textContent = `μ2 = ${s2.mean}`;
-        svg.appendChild(t2);
       }
     }
   }

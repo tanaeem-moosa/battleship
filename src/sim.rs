@@ -12,7 +12,9 @@ use crate::game::{
 };
 use crate::rng::Rng;
 use crate::strategy::{
-    AttackStrategy, CheckerboardAttack, DefenseStrategy, HuntAndTargetAttack, RandomDefense,
+    AdaptiveStrideUpAttack, AttackStrategy, CheckerboardAttack, DefenseStrategy,
+    HuntAndTargetAttack, LargestRectMidpointAttack, RandomDefense, RectStrideFourAttack,
+    StaggeredFourToTwoAttack,
 };
 
 /// Helper function to format (row, col) as "A1".."J10".
@@ -63,6 +65,42 @@ pub struct HeadToHeadStats {
     pub p2_win_rate: f64,
 }
 
+/// Individual pairwise match result between Strategy A and Strategy B in the tournament.
+#[derive(Clone, Debug)]
+pub struct PairwiseMatchResult {
+    pub p1_id: String,
+    pub p1_name: String,
+    pub p2_id: String,
+    pub p2_name: String,
+    pub total_games: usize,
+    pub p1_wins: usize,
+    pub p2_wins: usize,
+    pub p1_win_rate: f64,
+    pub p2_win_rate: f64,
+}
+
+/// Overall standing of a strategy in the round-robin tournament.
+#[derive(Clone, Debug)]
+pub struct TournamentStanding {
+    pub rank: usize,
+    pub id: String,
+    pub name: String,
+    pub total_matches: usize,
+    pub wins: usize,
+    pub losses: usize,
+    pub win_rate: f64,
+}
+
+/// Complete 6x6 Head-to-Head Tournament Matrix & Standings.
+#[derive(Clone, Debug)]
+pub struct HeadToHeadMatrix {
+    pub strategy_ids: Vec<String>,
+    pub strategy_names: Vec<String>,
+    pub matrix: Vec<Vec<f64>>, // matrix[i][j] is win % of strategy i against strategy j
+    pub pairings: Vec<PairwiseMatchResult>,
+    pub standings: Vec<TournamentStanding>,
+}
+
 /// Comprehensive benchmark report.
 #[derive(Clone, Debug)]
 pub struct BenchmarkReport {
@@ -70,6 +108,7 @@ pub struct BenchmarkReport {
     pub seed: u64,
     pub strategies: Vec<StrategyStats>,
     pub head_to_head: HeadToHeadStats,
+    pub tournament: HeadToHeadMatrix,
 }
 
 /// Simulate a single player game where `attack` tries to sink all ships placed by `defense`.
@@ -296,92 +335,207 @@ pub fn compute_stats(id: &str, name: &str, mut turns: Vec<usize>) -> StrategySta
     }
 }
 
+/// Helper to construct a boxed AttackStrategy along with its ID and display name.
+pub fn create_strategy_instance(
+    idx: usize,
+) -> (Box<dyn AttackStrategy>, &'static str, &'static str) {
+    match idx {
+        0 => (
+            Box::new(HuntAndTargetAttack::new()),
+            "random_hunt",
+            "Random + Hunt/Target",
+        ),
+        1 => (
+            Box::new(CheckerboardAttack::new()),
+            "checkerboard",
+            "Checkerboard + Hunt/Target",
+        ),
+        2 => (
+            Box::new(LargestRectMidpointAttack::new()),
+            "largest_rect",
+            "Largest Empty Rect Midpoint",
+        ),
+        3 => (
+            Box::new(AdaptiveStrideUpAttack::new()),
+            "adaptive_stride",
+            "Adaptive Stride (2->3->4->5)",
+        ),
+        4 => (
+            Box::new(StaggeredFourToTwoAttack::new()),
+            "stride4_to_2",
+            "Staggered Stride (4->2)",
+        ),
+        5 => (
+            Box::new(RectStrideFourAttack::new()),
+            "rect_stride4",
+            "Largest Rect + Stride (4->2)",
+        ),
+        _ => (
+            Box::new(HuntAndTargetAttack::new()),
+            "random_hunt",
+            "Random + Hunt/Target",
+        ),
+    }
+}
+
 /// Execute a full benchmark over `games` iterations:
-/// 1. Evaluates Random + Hunt/Target solo
-/// 2. Evaluates Checkerboard + Hunt/Target solo
-/// 3. Simulates head-to-head matches between them
+/// 1. Evaluates all 6 strategies in solo simulation
+/// 2. Executes a complete 6x6 All-Pairs Head-to-Head Tournament alternating first-turn player
 pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
     let mut rng = Rng::with_seed(seed);
     let mut defense = RandomDefense::new();
 
-    // 1. Evaluate HuntAndTargetAttack
-    let mut strat1 = HuntAndTargetAttack::new();
-    let mut turns1 = Vec::with_capacity(games);
-    for _ in 0..games {
-        turns1.push(simulate_game(&mut strat1, &mut defense, &mut rng));
+    // 1. Evaluate all 6 strategies solo
+    let mut strategies = Vec::with_capacity(6);
+    for idx in 0..6 {
+        let (mut strat, id, name) = create_strategy_instance(idx);
+        let mut turns = Vec::with_capacity(games);
+        for _ in 0..games {
+            turns.push(simulate_game(strat.as_mut(), &mut defense, &mut rng));
+        }
+        strategies.push(compute_stats(id, name, turns));
     }
-    let stats1 = compute_stats("random_hunt", strat1.name(), turns1);
 
-    // 2. Evaluate CheckerboardAttack
-    let mut strat2 = CheckerboardAttack::new();
-    let mut turns2 = Vec::with_capacity(games);
-    for _ in 0..games {
-        turns2.push(simulate_game(&mut strat2, &mut defense, &mut rng));
-    }
-    let stats2 = compute_stats("checkerboard", strat2.name(), turns2);
+    // 2. Complete 6x6 All-Pairs Head-to-Head Tournament (15 distinct pairings)
+    let battles_per_pair = games.min(400);
+    let mut win_counts = [[0usize; 6]; 6];
+    let mut pairings = Vec::with_capacity(15);
 
-    // 3. Head-to-Head Matches
-    let mut p1_wins = 0;
-    let mut p2_wins = 0;
-    let mut def1 = RandomDefense::new();
-    let mut def2 = RandomDefense::new();
+    for i in 0..6 {
+        for j in (i + 1)..6 {
+            let (mut strat_i, id_i, name_i) = create_strategy_instance(i);
+            let (mut strat_j, id_j, name_j) = create_strategy_instance(j);
+            let mut i_wins = 0;
+            let mut j_wins = 0;
+            let mut def1 = RandomDefense::new();
+            let mut def2 = RandomDefense::new();
 
-    for i in 0..games {
-        let match_seed = rng.next_u64();
-        // Alternate starting player each match for perfect fairness
-        let replay = if i % 2 == 0 {
-            simulate_match(
-                "Random + Hunt/Target",
-                &mut strat1,
-                &mut def1,
-                "Checkerboard + Hunt/Target",
-                &mut strat2,
-                &mut def2,
-                match_seed,
-            )
-        } else {
-            let rev = simulate_match(
-                "Checkerboard + Hunt/Target",
-                &mut strat2,
-                &mut def2,
-                "Random + Hunt/Target",
-                &mut strat1,
-                &mut def1,
-                match_seed,
-            );
-            // Translate winner back
-            MatchReplay {
-                winner: if rev.winner == Player::Player1 {
-                    Player::Player2
+            for g in 0..battles_per_pair {
+                let match_seed = rng.next_u64();
+                // Alternate starting player each match to eliminate first-player advantage
+                if g % 2 == 0 {
+                    let replay = simulate_match(
+                        name_i,
+                        strat_i.as_mut(),
+                        &mut def1,
+                        name_j,
+                        strat_j.as_mut(),
+                        &mut def2,
+                        match_seed,
+                    );
+                    if replay.winner == Player::Player1 {
+                        i_wins += 1;
+                    } else {
+                        j_wins += 1;
+                    }
                 } else {
-                    Player::Player1
-                },
-                ..rev
+                    let replay = simulate_match(
+                        name_j,
+                        strat_j.as_mut(),
+                        &mut def2,
+                        name_i,
+                        strat_i.as_mut(),
+                        &mut def1,
+                        match_seed,
+                    );
+                    if replay.winner == Player::Player1 {
+                        j_wins += 1;
+                    } else {
+                        i_wins += 1;
+                    }
+                }
             }
-        };
 
-        if replay.winner == Player::Player1 {
-            p1_wins += 1;
-        } else {
-            p2_wins += 1;
+            win_counts[i][j] = i_wins;
+            win_counts[j][i] = j_wins;
+            let i_rate = i_wins as f64 / battles_per_pair as f64;
+            let j_rate = j_wins as f64 / battles_per_pair as f64;
+
+            pairings.push(PairwiseMatchResult {
+                p1_id: id_i.to_string(),
+                p1_name: name_i.to_string(),
+                p2_id: id_j.to_string(),
+                p2_name: name_j.to_string(),
+                total_games: battles_per_pair,
+                p1_wins: i_wins,
+                p2_wins: j_wins,
+                p1_win_rate: i_rate,
+                p2_win_rate: j_rate,
+            });
         }
     }
 
+    // 3. Build 6x6 Win Rate Matrix (percentages)
+    let mut matrix = vec![vec![50.0; 6]; 6];
+    for i in 0..6 {
+        for j in 0..6 {
+            if i != j {
+                matrix[i][j] = (win_counts[i][j] as f64 / battles_per_pair as f64) * 100.0;
+            }
+        }
+    }
+
+    // 4. Build Tournament Standings
+    let mut standings = Vec::with_capacity(6);
+    for i in 0..6 {
+        let (_, id, name) = create_strategy_instance(i);
+        let wins: usize = (0..6).filter(|&j| j != i).map(|j| win_counts[i][j]).sum();
+        let total_matches = 5 * battles_per_pair;
+        let losses = total_matches - wins;
+        let win_rate = wins as f64 / total_matches as f64;
+        standings.push(TournamentStanding {
+            rank: 0,
+            id: id.to_string(),
+            name: name.to_string(),
+            total_matches,
+            wins,
+            losses,
+            win_rate,
+        });
+    }
+    standings.sort_by(|a, b| {
+        b.win_rate
+            .partial_cmp(&a.win_rate)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for (r, s) in standings.iter_mut().enumerate() {
+        s.rank = r + 1;
+    }
+
+    let strategy_ids: Vec<String> = (0..6)
+        .map(|i| create_strategy_instance(i).1.to_string())
+        .collect();
+    let strategy_names: Vec<String> = (0..6)
+        .map(|i| create_strategy_instance(i).2.to_string())
+        .collect();
+
+    let tournament = HeadToHeadMatrix {
+        strategy_ids,
+        strategy_names,
+        matrix,
+        pairings,
+        standings,
+    };
+
+    // Classic P1 (Random Hunt) vs P2 (Checkerboard) summary
+    let p1_wins = win_counts[0][1];
+    let p2_wins = win_counts[1][0];
     let h2h = HeadToHeadStats {
         p1_name: "Random + Hunt/Target".to_string(),
         p2_name: "Checkerboard + Hunt/Target".to_string(),
-        total_games: games,
+        total_games: battles_per_pair,
         p1_wins,
         p2_wins,
-        p1_win_rate: p1_wins as f64 / games as f64,
-        p2_win_rate: p2_wins as f64 / games as f64,
+        p1_win_rate: p1_wins as f64 / battles_per_pair as f64,
+        p2_win_rate: p2_wins as f64 / battles_per_pair as f64,
     };
 
     BenchmarkReport {
         games_per_strategy: games,
         seed,
-        strategies: vec![stats1, stats2],
+        strategies,
         head_to_head: h2h,
+        tournament,
     }
 }
 
@@ -558,32 +712,112 @@ impl StrategyStats {
     }
 }
 
+fn pairwise_match_to_json(p: &PairwiseMatchResult) -> String {
+    format!(
+        "{{\"strategy_a\":{},\"strategy_b\":{},\"a_name\":{},\"b_name\":{},\"total_games\":{},\"a_wins\":{},\"b_wins\":{},\"a_win_rate\":{:.4},\"b_win_rate\":{:.4}}}",
+        json_str(&p.p1_id),
+        json_str(&p.p2_id),
+        json_str(&p.p1_name),
+        json_str(&p.p2_name),
+        p.total_games,
+        p.p1_wins,
+        p.p2_wins,
+        p.p1_win_rate,
+        p.p2_win_rate
+    )
+}
+
+fn tournament_standing_to_json(s: &TournamentStanding) -> String {
+    format!(
+        "{{\"rank\":{},\"id\":{},\"name\":{},\"total_matches\":{},\"wins\":{},\"losses\":{},\"win_rate\":{:.4}}}",
+        s.rank,
+        json_str(&s.id),
+        json_str(&s.name),
+        s.total_matches,
+        s.wins,
+        s.losses,
+        s.win_rate
+    )
+}
+
+impl HeadToHeadMatrix {
+    pub fn to_json(&self) -> String {
+        let ids_json: Vec<String> = self.strategy_ids.iter().map(|s| json_str(s)).collect();
+        let names_json: Vec<String> = self.strategy_names.iter().map(|s| json_str(s)).collect();
+        let matrix_json: Vec<String> = self
+            .matrix
+            .iter()
+            .map(|row| {
+                let row_str: Vec<String> = row.iter().map(|v| format!("{:.1}", v)).collect();
+                format!("[{}]", row_str.join(","))
+            })
+            .collect();
+        let pairings_json: Vec<String> = self.pairings.iter().map(pairwise_match_to_json).collect();
+        let standings_json: Vec<String> =
+            self.standings.iter().map(tournament_standing_to_json).collect();
+
+        format!(
+            "{{\"strategy_ids\":[{}],\"strategy_names\":[{}],\"matrix\":[{}],\"pairings\":[{}],\"standings\":[{}]}}",
+            ids_json.join(","),
+            names_json.join(","),
+            matrix_json.join(","),
+            pairings_json.join(","),
+            standings_json.join(",")
+        )
+    }
+}
+
 impl BenchmarkReport {
     pub fn to_json(&self) -> String {
-        let strat1 = self
+        let s0 = self
             .strategies
             .get(0)
             .map(|s| s.to_json())
             .unwrap_or_else(|| "{}".to_string());
-        let strat2 = self
+        let s1 = self
             .strategies
             .get(1)
             .map(|s| s.to_json())
             .unwrap_or_else(|| "{}".to_string());
+        let s2 = self
+            .strategies
+            .get(2)
+            .map(|s| s.to_json())
+            .unwrap_or_else(|| "{}".to_string());
+        let s3 = self
+            .strategies
+            .get(3)
+            .map(|s| s.to_json())
+            .unwrap_or_else(|| "{}".to_string());
+        let s4 = self
+            .strategies
+            .get(4)
+            .map(|s| s.to_json())
+            .unwrap_or_else(|| "{}".to_string());
+        let s5 = self
+            .strategies
+            .get(5)
+            .map(|s| s.to_json())
+            .unwrap_or_else(|| "{}".to_string());
+
         let strats_list: Vec<String> = self.strategies.iter().map(|s| s.to_json()).collect();
 
         let p1_rate_pct = self.head_to_head.p1_win_rate * 100.0;
         let p2_rate_pct = self.head_to_head.p2_win_rate * 100.0;
 
         format!(
-            "{{\"games\":{},\"games_per_strategy\":{},\"seed\":{},\"strategies\":{{\"random_hunt\":{},\"random\":{},\"checkerboard_hunt\":{},\"checkerboard\":{},\"strategy_list\":[{}]}},\"head_to_head\":{{\"p1_name\":{},\"p2_name\":{},\"total_games\":{},\"p1_wins\":{},\"p2_wins\":{},\"p1_win_rate\":{:.4},\"p2_win_rate\":{:.4},\"checkerboard_wins\":{},\"random_wins\":{},\"checkerboard_win_rate\":{:.1},\"random_win_rate\":{:.1}}}}}",
+            "{{\"games\":{},\"games_per_strategy\":{},\"seed\":{},\"strategies\":{{\"random_hunt\":{},\"random\":{},\"checkerboard_hunt\":{},\"checkerboard\":{},\"largest_rect\":{},\"adaptive_stride\":{},\"stride4_to_2\":{},\"rect_stride4\":{},\"strategy_list\":[{}]}},\"head_to_head\":{{\"p1_name\":{},\"p2_name\":{},\"total_games\":{},\"p1_wins\":{},\"p2_wins\":{},\"p1_win_rate\":{:.4},\"p2_win_rate\":{:.4},\"checkerboard_wins\":{},\"random_wins\":{},\"checkerboard_win_rate\":{:.1},\"random_win_rate\":{:.1}}},\"head_to_head_matrix\":{},\"tournament\":{}}}",
             self.games_per_strategy,
             self.games_per_strategy,
             self.seed,
-            strat1,
-            strat1,
-            strat2,
-            strat2,
+            s0,
+            s0,
+            s1,
+            s1,
+            s2,
+            s3,
+            s4,
+            s5,
             strats_list.join(","),
             json_str(&self.head_to_head.p1_name),
             json_str(&self.head_to_head.p2_name),
@@ -595,7 +829,9 @@ impl BenchmarkReport {
             self.head_to_head.p2_wins,
             self.head_to_head.p1_wins,
             p2_rate_pct,
-            p1_rate_pct
+            p1_rate_pct,
+            self.tournament.to_json(),
+            self.tournament.to_json()
         )
     }
 }
@@ -606,36 +842,74 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
     println!("================================================================================");
     println!("                     BATTLESHIP ENGINE BENCHMARK REPORT                         ");
     println!("================================================================================");
+    let battles_count = report
+        .tournament
+        .pairings
+        .first()
+        .map(|p| p.total_games)
+        .unwrap_or(0);
     println!(
-        "Games simulated: {} per strategy | Base Seed: {}",
-        report.games_per_strategy, report.seed
+        "Games simulated: {} solo per strategy | Tournament: {} duels per pair | Base Seed: {}",
+        report.games_per_strategy, battles_count, report.seed
     );
     println!();
     println!("STRATEGY PERFORMANCE (Turns to sink all 17 ship cells):");
-    println!("+----------------------------+-------+--------+-----+-----+-------+-----+-----+");
-    println!("| Strategy                   | Mean  | Median | Min | Max | StDev | P10 | P90 |");
-    println!("+----------------------------+-------+--------+-----+-----+-------+-----+-----+");
+    println!("+-----------------------------------+-------+--------+-----+-----+-------+-----+-----+");
+    println!("| Strategy                          | Mean  | Median | Min | Max | StDev | P10 | P90 |");
+    println!("+-----------------------------------+-------+--------+-----+-----+-------+-----+-----+");
     for s in &report.strategies {
         println!(
-            "| {:<26} | {:>5.1} | {:>6.1} | {:>3} | {:>3} | {:>5.2} | {:>3.0} | {:>3.0} |",
+            "| {:<33} | {:>5.1} | {:>6.1} | {:>3} | {:>3} | {:>5.2} | {:>3.0} | {:>3.0} |",
             s.name, s.mean, s.median, s.min, s.max, s.std_dev, s.p10, s.p90
         );
     }
-    println!("+----------------------------+-------+--------+-----+-----+-------+-----+-----+");
+    println!("+-----------------------------------+-------+--------+-----+-----+-------+-----+-----+");
     println!();
-    println!("HEAD-TO-HEAD MATCHUP RESULTS ({} games):", report.head_to_head.total_games);
-    println!(
-        "  {:<28} : {:>4} wins ({:>5.1}%)",
-        report.head_to_head.p1_name,
-        report.head_to_head.p1_wins,
-        report.head_to_head.p1_win_rate * 100.0
-    );
-    println!(
-        "  {:<28} : {:>4} wins ({:>5.1}%)",
-        report.head_to_head.p2_name,
-        report.head_to_head.p2_wins,
-        report.head_to_head.p2_win_rate * 100.0
-    );
+    println!("================================================================================");
+    println!("                     6x6 HEAD-TO-HEAD WIN RATE MATRIX (%)                       ");
+    println!("================================================================================");
+    println!("Columns indicate the opponent. Value is the row strategy's win % against column.");
+    for (i, name) in report.tournament.strategy_names.iter().enumerate() {
+        if i % 2 == 0 {
+            print!("  [{}] {:<32}", i + 1, name);
+        } else {
+            println!("[{}] {}", i + 1, name);
+        }
+    }
+    if report.tournament.strategy_names.len() % 2 != 0 {
+        println!();
+    }
+    println!();
+    println!("+-----------------------------------+--------+--------+--------+--------+--------+--------+");
+    println!("| Strategy                          |  [1]   |  [2]   |  [3]   |  [4]   |  [5]   |  [6]   |");
+    println!("+-----------------------------------+--------+--------+--------+--------+--------+--------+");
+    for (i, name) in report.tournament.strategy_names.iter().enumerate() {
+        print!("| [{}] {:<30} |", i + 1, name);
+        for j in 0..6 {
+            if i == j {
+                print!("   ---  |");
+            } else {
+                let rate = report.tournament.matrix[i][j];
+                print!(" {:>5.1}% |", rate);
+            }
+        }
+        println!();
+    }
+    println!("+-----------------------------------+--------+--------+--------+--------+--------+--------+");
+    println!();
+    println!("================================================================================");
+    println!("                 OVERALL TOURNAMENT STANDINGS (ALL-PAIRS DUELS)                 ");
+    println!("================================================================================");
+    println!("+------+-----------------------------------+---------+-------+--------+---------------+");
+    println!("| Rank | Strategy                          | Matches |  Wins | Losses | Overall Win % |");
+    println!("+------+-----------------------------------+---------+-------+--------+---------------+");
+    for s in &report.tournament.standings {
+        println!(
+            "| {:>4} | {:<33} | {:>7} | {:>5} | {:>6} | {:>12.1}% |",
+            s.rank, s.name, s.total_matches, s.wins, s.losses, s.win_rate * 100.0
+        );
+    }
+    println!("+------+-----------------------------------+---------+-------+--------+---------------+");
     println!();
     println!("ASCII TURNS DISTRIBUTION (5-turn buckets):");
     for strat in &report.strategies {
@@ -711,9 +985,12 @@ mod tests {
 
     #[test]
     fn test_benchmark_checkerboard_outperforms_random_hunt() {
-        // Run a fast benchmark of 50 games to verify checkerboard turns < random_hunt turns
-        let report = run_benchmark(50, 888);
-        assert_eq!(report.strategies.len(), 2);
+        // Run a fast benchmark of 20 games to verify checkerboard turns < random_hunt turns
+        let report = run_benchmark(20, 888);
+        assert_eq!(report.strategies.len(), 6);
+        assert_eq!(report.tournament.matrix.len(), 6);
+        assert_eq!(report.tournament.standings.len(), 6);
+        assert_eq!(report.tournament.pairings.len(), 15);
 
         let random_hunt_mean = report.strategies[0].mean;
         let checkerboard_mean = report.strategies[1].mean;
@@ -728,5 +1005,7 @@ mod tests {
         let json = report.to_json();
         assert!(json.contains("\"head_to_head\""));
         assert!(json.contains("\"strategies\""));
+        assert!(json.contains("\"tournament\""));
+        assert!(json.contains("\"head_to_head_matrix\""));
     }
 }

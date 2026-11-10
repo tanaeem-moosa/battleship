@@ -21,7 +21,7 @@
       </div>
       <div class="header-branding">
         <h1 class="tactical-title">BATTLESHIP <span class="accent-text">COMMAND &amp; STRATEGY LAB</span></h1>
-        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • HASBRO RULES • AI BENCHMARKING</div>
+        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 6 ATTACK STRATEGIES • BENCHMARK LAB</div>
       </div>
     </div>
 
@@ -55,8 +55,12 @@
         <div class="control-group">
           <label for="select-p1-strategy">Player 1 (North Fleet):</label>
           <select id="select-p1-strategy" class="tactical-select">
+            <option value="rect_stride4" selected>Largest Rect + Stride (4→2)</option>
+            <option value="stride4_to_2">Staggered Stride (4→2)</option>
+            <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
+            <option value="largest_rect">Largest Empty Rect Midpoint</option>
             <option value="checkerboard">Checkerboard + Hunt/Target</option>
-            <option value="random">Random + Hunt/Target</option>
+            <option value="random_hunt">Random + Hunt/Target</option>
           </select>
         </div>
 
@@ -65,8 +69,12 @@
         <div class="control-group">
           <label for="select-p2-strategy">Player 2 (South Fleet):</label>
           <select id="select-p2-strategy" class="tactical-select">
-            <option value="random">Random + Hunt/Target</option>
+            <option value="random_hunt" selected>Random + Hunt/Target</option>
             <option value="checkerboard">Checkerboard + Hunt/Target</option>
+            <option value="largest_rect">Largest Empty Rect Midpoint</option>
+            <option value="adaptive_stride">Adaptive Stride (2→3→4→5)</option>
+            <option value="stride4_to_2">Staggered Stride (4→2)</option>
+            <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
           </select>
         </div>
 
@@ -118,7 +126,7 @@
               <span class="player-color-tag p1-tag"></span>
               <div class="player-titles">
                 <h2 class="player-name">PLAYER 1</h2>
-                <span id="p1-strategy-label" class="player-strategy-badge">Checkerboard + Hunt/Target</span>
+                <span id="p1-strategy-label" class="player-strategy-badge">Largest Rect + Stride (4→2)</span>
               </div>
             </div>
             <div class="ai-state-indicator">
@@ -315,7 +323,7 @@
       <div class="benchmark-controls-panel">
         <div class="benchmark-inputs">
           <div class="control-group">
-            <label for="benchmark-game-count">Simulation Sample Size:</label>
+            <label for="benchmark-game-count">Simulation Sample Size (Per Strategy):</label>
             <select id="benchmark-game-count" class="tactical-select">
               <option value="100">100 Matches</option>
               <option value="500" selected>500 Matches</option>
@@ -332,7 +340,7 @@
           <div class="benchmark-run-btn-container">
             <button id="btn-run-benchmark" class="action-btn primary-btn run-benchmark-btn">
               <span class="btn-icon">⚡</span>
-              <span id="run-benchmark-text">Run Strategy Benchmark</span>
+              <span id="run-benchmark-text">Run 6-Strategy Benchmark</span>
             </button>
           </div>
         </div>
@@ -340,7 +348,7 @@
         <!-- Progress Bar Indicator -->
         <div id="benchmark-progress-container" class="benchmark-progress-wrapper" style="display: none;">
           <div class="progress-info-row">
-            <span id="benchmark-progress-status" class="progress-status-text">Simulating matches...</span>
+            <span id="benchmark-progress-status" class="progress-status-text">Simulating matches across 6 strategies...</span>
             <span id="benchmark-progress-percent" class="progress-percent-text">0%</span>
           </div>
           <div class="progress-track">
@@ -349,149 +357,60 @@
         </div>
       </div>
 
-      <!-- Benchmark Summary Metric Cards -->
-      <div class="benchmark-cards-grid">
-        
-        <!-- Strategy 1 Card: Random + Hunt/Target -->
-        <div class="benchmark-strategy-card card-random">
-          <div class="strat-card-header">
-            <div class="strat-badge-dot random-dot"></div>
-            <div>
-              <h3 class="strat-title">STRATEGY 1</h3>
-              <div class="strat-subtitle">Random + Hunt/Target</div>
-            </div>
+      <!-- 6-STRATEGY COMPARISON LEADERBOARD TABLE -->
+      <div class="leaderboard-card">
+        <div class="leaderboard-header">
+          <div class="lb-title-group">
+            <h3 class="lb-title">STRATEGY PERFORMANCE LEADERBOARD</h3>
+            <span class="lb-subtitle">Ranked by lowest Mean turns to sink all enemy ships (17 - 100 turns)</span>
           </div>
-          <div class="strat-desc">
-            Uniform random hunt over all 100 cells until first hit, then targets orthogonal neighbors along line of fire.
-          </div>
-          <div class="strat-metrics-table">
-            <div class="metric-row highlight-metric">
-              <span class="metric-name">Mean (Avg) Turns:</span>
-              <span id="metric-strat1-mean" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Median Turns:</span>
-              <span id="metric-strat1-median" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Min Turns (Best):</span>
-              <span id="metric-strat1-min" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Max Turns (Worst):</span>
-              <span id="metric-strat1-max" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Std Deviation (σ):</span>
-              <span id="metric-strat1-std" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">90th Percentile (P90):</span>
-              <span id="metric-strat1-p90" class="metric-val">--</span>
-            </div>
+          <div class="lb-champion-badge" id="lb-champion-badge">
+            <span class="trophy-icon">🏆</span>
+            <span class="champion-text">CHAMPION: <strong id="champion-name">--</strong></span>
           </div>
         </div>
 
-        <!-- Strategy 2 Card: Checkerboard + Hunt/Target -->
-        <div class="benchmark-strategy-card card-checkerboard">
-          <div class="strat-card-header">
-            <div class="strat-badge-dot checkerboard-dot"></div>
-            <div>
-              <h3 class="strat-title">STRATEGY 2</h3>
-              <div class="strat-subtitle">Checkerboard + Hunt/Target</div>
-            </div>
-          </div>
-          <div class="strat-desc">
-            Parity-restricted hunt on <code>(r+c)%2 == 0</code> (50 cells). Because min ship size is 2, all ships must touch parity cells!
-          </div>
-          <div class="strat-metrics-table">
-            <div class="metric-row highlight-metric">
-              <span class="metric-name">Mean (Avg) Turns:</span>
-              <span id="metric-strat2-mean" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Median Turns:</span>
-              <span id="metric-strat2-median" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Min Turns (Best):</span>
-              <span id="metric-strat2-min" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Max Turns (Worst):</span>
-              <span id="metric-strat2-max" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">Std Deviation (σ):</span>
-              <span id="metric-strat2-std" class="metric-val">--</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-name">90th Percentile (P90):</span>
-              <span id="metric-strat2-p90" class="metric-val">--</span>
-            </div>
-          </div>
+        <div class="leaderboard-table-wrapper">
+          <table class="leaderboard-table" id="leaderboard-table">
+            <thead>
+              <tr>
+                <th class="th-rank">RANK</th>
+                <th class="th-strategy">STRATEGY</th>
+                <th class="th-mean">MEAN TURNS</th>
+                <th class="th-median">MEDIAN</th>
+                <th class="th-std">STD DEV (σ)</th>
+                <th class="th-min">MIN (BEST)</th>
+                <th class="th-max">MAX (WORST)</th>
+                <th class="th-p10">P10</th>
+                <th class="th-p90">P90</th>
+                <th class="th-winrate">WIN RATE VS RANDOM</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-tbody">
+              <!-- Dynamically populated rows for all 6 strategies -->
+            </tbody>
+          </table>
         </div>
+      </div>
 
-        <!-- Head-to-Head Win Rate Card -->
-        <div class="benchmark-strategy-card card-headtohead">
-          <div class="strat-card-header">
-            <div class="strat-badge-dot h2h-dot"></div>
-            <div>
-              <h3 class="strat-title">HEAD-TO-HEAD MATCHUP</h3>
-              <div class="strat-subtitle">Simultaneous Duels (P1 vs P2)</div>
-            </div>
-          </div>
-          
-          <div class="h2h-summary-section">
-            <div class="h2h-rates-display">
-              <div class="h2h-player-stat">
-                <span class="h2h-label">Strategy 2 (Checkerboard)</span>
-                <span id="h2h-s2-winrate" class="h2h-percent checkerboard-color">--%</span>
-                <span id="h2h-s2-wincount" class="h2h-subcount">0 wins</span>
-              </div>
-              <div class="h2h-vs-badge">VS</div>
-              <div class="h2h-player-stat">
-                <span class="h2h-label">Strategy 1 (Random)</span>
-                <span id="h2h-s1-winrate" class="h2h-percent random-color">--%</span>
-                <span id="h2h-s1-wincount" class="h2h-subcount">0 wins</span>
-              </div>
-            </div>
-
-            <!-- Head to Head Ratio Bar -->
-            <div class="h2h-bar-container">
-              <div id="h2h-bar-s2" class="h2h-bar-segment s2-fill" style="width: 50%;"></div>
-              <div id="h2h-bar-s1" class="h2h-bar-segment s1-fill" style="width: 50%;"></div>
-            </div>
-
-            <div class="h2h-speedup-callout" id="h2h-speedup-callout">
-              Run benchmark to view performance delta and win advantage.
-            </div>
-          </div>
-        </div>
-
+      <!-- 6 STRATEGY SUMMARY CARDS GRID -->
+      <div class="benchmark-cards-grid six-cards-grid" id="benchmark-cards-grid">
+        <!-- Dynamically rendered or updated for all 6 strategies -->
       </div>
 
       <!-- Turn Distribution Histogram Section -->
       <div class="histogram-section-card">
         <div class="histogram-header">
           <div class="hist-title-group">
-            <h3 class="hist-title">TURN-TO-WIN FREQUENCY DISTRIBUTION</h3>
-            <span class="hist-subtitle">Comparing turn counts across all simulated games (17 to 100 turns)</span>
+            <h3 class="hist-title">MULTI-STRATEGY TURN-TO-WIN FREQUENCY DISTRIBUTION</h3>
+            <span class="hist-subtitle">Comparing probability density curves across all 6 strategies (click legend pills to toggle curves)</span>
           </div>
-          <div class="hist-legend">
-            <div class="legend-item">
-              <span class="legend-swatch swatch-random"></span>
-              <span class="legend-text">Strategy 1 (Random + Hunt/Target)</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-swatch swatch-checkerboard"></span>
-              <span class="legend-text">Strategy 2 (Checkerboard + Hunt/Target)</span>
-            </div>
+          <div class="hist-legend-multi" id="hist-legend-multi">
+            <!-- Dynamically populated toggle pills for all 6 strategies -->
           </div>
         </div>
 
         <div class="histogram-chart-wrapper" id="histogram-container">
-          <!-- Rendered as responsive SVG or Canvas via app.js -->
           <svg id="histogram-svg" class="histogram-svg" viewBox="0 0 1000 420" preserveAspectRatio="xMidYMid meet"></svg>
           <div id="hist-tooltip" class="hist-tooltip" style="display: none;"></div>
         </div>
@@ -499,9 +418,10 @@
         <div class="parity-math-explanation">
           <div class="expl-icon">💡</div>
           <div class="expl-text">
-            <strong>The Mathematical Parity Advantage:</strong>
-            Because the smallest ship in Hasbro Battleship is the Destroyer (length 2), any placement on a 2D grid must cross at least one cell where <code>(row + col) % 2 == 0</code>.
-            By restricting hunt shots to only the 50 parity cells instead of all 100, Checkerboard cuts the required search space by 50% while guaranteeing no ship can ever slip past undetected! This yields an average efficiency improvement of <strong>~10 to 12 turns</strong> per game, translating into a decisive <strong>~65% to 75% head-to-head win rate</strong>.
+            <strong>The Stride &amp; Rectangular Optimization Breakthrough:</strong>
+            Standard <strong>Checkerboard</strong> reduces the hunt space by 50% using parity stride 2 (guaranteeing detection of the length-2 Destroyer). 
+            However, <strong>Staggered Stride (4→2)</strong> and <strong>Largest Rect + Stride (4→2)</strong> take this even further: by hunting on a 4-stride diagonal grid while Carrier (5) or Battleship (4) are afloat, they search with <strong>75% fewer cells</strong> during early turns, finding large capital ships rapidly before tightening to 2-stride. 
+            Furthermore, combining <strong>Largest Empty Rectangle Midpoint</strong> ensures shots are placed right into the center of large unexplored voids rather than on boundaries, drastically maximizing the chance of intersecting hidden fleets!
           </div>
         </div>
       </div>
@@ -526,7 +446,7 @@
           </div>
           <div class="mstat">
             <span class="mstat-label">WINNING STRATEGY</span>
-            <span id="mstat-strat" class="mstat-val">Checkerboard</span>
+            <span id="mstat-strat" class="mstat-val">Largest Rect + Stride (4→2)</span>
           </div>
           <div class="mstat">
             <span class="mstat-label">P1 ACCURACY</span>

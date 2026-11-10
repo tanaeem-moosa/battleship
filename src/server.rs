@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 use crate::rng::Rng;
 use crate::sim::{run_benchmark, simulate_match};
 use crate::strategy::{
-    AttackStrategy, CheckerboardAttack, HuntAndTargetAttack, RandomDefense,
+    AdaptiveStrideUpAttack, AttackStrategy, CheckerboardAttack, HuntAndTargetAttack,
+    LargestRectMidpointAttack, RandomDefense, RectStrideFourAttack, StaggeredFourToTwoAttack,
 };
 
 /// Instantiate an attack strategy from its CLI / URL string identifier.
@@ -28,6 +29,22 @@ pub fn create_strategy(id: &str) -> (Box<dyn AttackStrategy>, &'static str) {
         "checkerboard" | "checkers" | "parity" => (
             Box::new(CheckerboardAttack::new()),
             "Checkerboard + Hunt/Target",
+        ),
+        "largest_rect" | "rect" | "largest_rectangle" | "midpoint" => (
+            Box::new(LargestRectMidpointAttack::new()),
+            "Largest Empty Rect Midpoint",
+        ),
+        "adaptive_stride" | "adaptive" | "stride_up" => (
+            Box::new(AdaptiveStrideUpAttack::new()),
+            "Adaptive Stride (2->3->4->5)",
+        ),
+        "stride4_to_2" | "staggered" | "staggered_stride" | "stride4" => (
+            Box::new(StaggeredFourToTwoAttack::new()),
+            "Staggered Stride (4->2)",
+        ),
+        "rect_stride4" | "rect_stride" | "rect4" | "largest_rect_stride" => (
+            Box::new(RectStrideFourAttack::new()),
+            "Largest Rect + Stride (4->2)",
         ),
         _ => (
             Box::new(CheckerboardAttack::new()),
@@ -318,5 +335,21 @@ mod tests {
         let (s2, name2) = create_strategy("checkerboard");
         assert_eq!(name2, "Checkerboard + Hunt/Target");
         assert_eq!(s2.current_mode(), "checkerboard");
+
+        let (s3, name3) = create_strategy("largest_rect");
+        assert_eq!(name3, "Largest Empty Rect Midpoint");
+        assert_eq!(s3.current_mode(), "largest_rect");
+
+        let (s4, name4) = create_strategy("adaptive_stride");
+        assert_eq!(name4, "Adaptive Stride (2->3->4->5)");
+        assert_eq!(s4.current_mode(), "adaptive_stride");
+
+        let (s5, name5) = create_strategy("stride4_to_2");
+        assert_eq!(name5, "Staggered Stride (4->2)");
+        assert_eq!(s5.current_mode(), "stride4_to_2");
+
+        let (s6, name6) = create_strategy("rect_stride4");
+        assert_eq!(name6, "Largest Rect + Stride (4->2)");
+        assert_eq!(s6.current_mode(), "rect_stride4");
     }
 }

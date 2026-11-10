@@ -22,17 +22,25 @@ USAGE:
     cargo run -- [SUBCOMMAND] [OPTIONS]
 
 SUBCOMMANDS:
-    simulate (default)  Run multi-game statistical benchmark of attack strategies.
-                        Prints summary table & ASCII histogram to stdout, and writes
-                        precomputed data to `viewer/sample_data.js`.
+    simulate (default)  Run multi-game statistical benchmark of all 6 attack strategies
+                        and complete 6x6 round-robin head-to-head tournament.
+                        Prints summary table, tournament standings, 6x6 matrix &
+                        ASCII histogram to stdout, and writes `viewer/sample_data.js`.
                         Options:
                           --games <N>    Number of games per strategy (default: 1000)
                           --seed <S>     PRNG seed for reproducible results (default: 42)
 
     match               Simulate a single head-to-head match and print JSON to stdout.
                         Options:
-                          --p1 <STRAT>   Player 1 strategy: random_hunt | checkerboard (default: random_hunt)
-                          --p2 <STRAT>   Player 2 strategy: random_hunt | checkerboard (default: checkerboard)
+                          --p1 <STRAT>   Player 1 strategy (default: random_hunt)
+                          --p2 <STRAT>   Player 2 strategy (default: checkerboard)
+                                         Available:
+                                           - random_hunt     ("Random + Hunt/Target")
+                                           - checkerboard    ("Checkerboard + Hunt/Target")
+                                           - largest_rect    ("Largest Empty Rect Midpoint")
+                                           - adaptive_stride ("Adaptive Stride (2->3->4->5)")
+                                           - stride4_to_2    ("Staggered Stride (4->2)")
+                                           - rect_stride4    ("Largest Rect + Stride (4->2)")
                           --seed <S>     PRNG seed (default: 42)
 
     serve               Start local HTTP server serving web viewer and REST APIs.
@@ -43,7 +51,7 @@ SUBCOMMANDS:
 
 EXAMPLES:
     cargo run -- simulate --games 1000 --seed 42
-    cargo run -- match --p1 random_hunt --p2 checkerboard --seed 123
+    cargo run -- match --p1 rect_stride4 --p2 checkerboard --seed 123
     cargo run -- serve --port 8080
 "#
     );
@@ -103,16 +111,14 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let report = run_benchmark(games, seed);
     print_benchmark_summary(&report);
 
-    // Pre-generate 4 diverse sample matches for the browser viewer:
-    // 1. Random Hunt vs Checkerboard
-    // 2. Checkerboard vs Random Hunt
-    // 3. Checkerboard vs Checkerboard
-    // 4. Random Hunt vs Random Hunt
+    // Pre-generate 6 diverse sample matches showcasing all strategies for the browser viewer:
     let sample_configs = [
         ("Random + Hunt/Target", "random_hunt", "Checkerboard + Hunt/Target", "checkerboard", seed),
-        ("Checkerboard + Hunt/Target", "checkerboard", "Random + Hunt/Target", "random_hunt", seed + 101),
-        ("Checkerboard (P1)", "checkerboard", "Checkerboard (P2)", "checkerboard", seed + 777),
-        ("Random Hunt (P1)", "random_hunt", "Random Hunt (P2)", "random_hunt", seed + 999),
+        ("Checkerboard + Hunt/Target", "checkerboard", "Largest Rect + Stride (4->2)", "rect_stride4", seed + 101),
+        ("Staggered Stride (4->2)", "stride4_to_2", "Adaptive Stride (2->3->4->5)", "adaptive_stride", seed + 202),
+        ("Largest Empty Rect Midpoint", "largest_rect", "Random + Hunt/Target", "random_hunt", seed + 303),
+        ("Largest Rect + Stride (4->2)", "rect_stride4", "Staggered Stride (4->2)", "stride4_to_2", seed + 777),
+        ("Adaptive Stride (2->3->4->5)", "adaptive_stride", "Checkerboard + Hunt/Target", "checkerboard", seed + 999),
     ];
 
     let mut sample_matches = Vec::new();

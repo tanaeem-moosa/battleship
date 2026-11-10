@@ -10,7 +10,9 @@ pub use game::{
     TrackingCell, HEIGHT, TOTAL_SHIP_CELLS, WIDTH,
 };
 pub use strategy::{
-    AttackStrategy, CheckerboardAttack, DefenseStrategy, HuntAndTargetAttack, RandomDefense,
+    find_largest_empty_rectangles, AdaptiveStrideUpAttack, AttackStrategy, CheckerboardAttack,
+    DefenseStrategy, HuntAndTargetAttack, LargestRectMidpointAttack, RandomDefense,
+    RectStrideFourAttack, StaggeredFourToTwoAttack, TargetTracker,
 };
 pub use sim::{
     compute_stats, print_benchmark_summary, run_benchmark, simulate_game, simulate_match,

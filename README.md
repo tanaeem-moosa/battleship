@@ -4,7 +4,7 @@
 
 A high-performance, deterministic Battleship simulation engine, CLI, and HTTP server written in **pure Rust standard library (`std` only, zero external crate dependencies)**.
 
-Simulates games conforming strictly to standard Hasbro Battleship rules and provides deep statistical benchmarking between attack strategies, including **Random Hunt/Target** and **Checkerboard Hunt/Target**.
+Simulates games conforming strictly to standard Hasbro Battleship rules and provides deep statistical benchmarking across **6 distinct attack strategies**, including a complete **6x6 All-Pairs Head-to-Head Tournament Matrix** and overall standings.
 
 ---
 
@@ -12,11 +12,15 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
 
 - **Standard Hasbro Ruleset**: 10×10 ocean grid (`WIDTH = 10`, `HEIGHT = 10`), 5 ships (`Carrier` 5, `Battleship` 4, `Cruiser` 3, `Submarine` 3, `Destroyer` 2 — total 17 cells), orthogonal placements, non-overlapping constraints, and explicit shot outcomes (`Miss`, `Hit`, `Sunk(ShipKind)`).
 - **Fast Deterministic PRNG**: `Xoshiro256**` algorithm seeded via `SplitMix64` with unbiased Lemire integer range generation. 100% reproducible simulations given any 64-bit seed.
-- **Advanced Attack Strategies**:
-  - `Random + Hunt/Target`: Pure random hunt mode with smart collinear and orthogonal hunt-down targeting.
-  - `Checkerboard + Hunt/Target`: Parity-restricted hunt mode (`(row + col) % 2 == parity`) leveraging the mathematical certainty that any ship of length $\ge 2$ intersects the parity grid.
-  - **Smart Collinear Targeting**: Automatically identifies 2+ collinear active hits, prioritizes unshot line endpoints, falls back to orthogonal neighbors (`N, S, E, W`), and resolves multi-ship contact upon sinking.
-- **Statistical Benchmark Engine**: Measures mean, median, min, max, standard deviation, P10, P90, turn distribution histograms (17..=100), and simultaneous head-to-head win rates over $N$ games.
+- **6 Advanced Attack Strategies**:
+  1. `random_hunt`: **Random + Hunt/Target** — uniform random hunt mode with smart collinear and orthogonal hunt-down targeting.
+  2. `checkerboard`: **Checkerboard + Hunt/Target** — parity-restricted hunt mode (`(row + col) % 2 == parity`) leveraging the mathematical certainty that any ship of length $\ge 2$ intersects the parity grid.
+  3. `largest_rect`: **Largest Empty Rect Midpoint** — 2D prefix-sum algorithm finding the largest all-unshot axis-aligned rectangle (maximizing area, breaking ties by `min(height, width)`), firing at its midpoint.
+  4. `adaptive_stride`: **Adaptive Stride (2->3->4->5)** — dynamically adapts the hunt stride to the minimum remaining unsunk ship length $k$ (starts at 2 while Destroyer is alive, stepping up to 3, 4, 5 as small ships sink).
+  5. `stride4_to_2`: **Staggered Stride (4->2)** — searches on a staggered 4-stride grid while Carrier (5) or Battleship (4) are afloat, then drops seamlessly to 2-stride checkerboard.
+  6. `rect_stride4`: **Largest Rect + Stride (4->2)** — combines the largest empty rectangle center with the active 4-to-2 stride, targeting the center of the largest unexplored territory.
+- **Smart Collinear Targeting**: Automatically identifies 2+ collinear active hits, prioritizes unshot line endpoints, falls back to orthogonal neighbors (`N, S, E, W`), and resolves multi-ship contact upon sinking.
+- **6x6 Tournament Engine**: Runs an all-pairs round-robin tournament across all 6 strategies with alternating first-mover turns to eliminate starting-player bias, producing a 6x6 win rate matrix and overall standings.
 - **Embedded HTTP Server & REST API**: Pure `std::net::TcpListener` server hosting static assets from `viewer/` and exposing JSON API endpoints (`/api/match` and `/api/benchmark`).
 - **Zero External Dependencies**: 100% pure Rust standard library.
 
@@ -32,8 +36,8 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
 │   ├── main.rs                # CLI entry point (simulate, match, serve)
 │   ├── rng.rs                 # Deterministic PRNG (Xoshiro256** + SplitMix64)
 │   ├── game.rs                # Hasbro rules, Board, TrackingBoard, ShipKind, MoveRecord
-│   ├── strategy.rs            # DefenseStrategy, AttackStrategy, TargetTracker
-│   ├── sim.rs                 # Simulation, benchmarks, JSON serializers, ASCII histogram
+│   ├── strategy.rs            # 6 AttackStrategy implementations, DefenseStrategy, TargetTracker
+│   ├── sim.rs                 # 6-way benchmarks, 6x6 tournament matrix, JSON serializers
 │   └── server.rs              # std::net HTTP server & REST API router
 ├── viewer/                    # Interactive Tactical Command Center Web UI
 │   ├── index.html             # Web viewer interface
@@ -45,73 +49,113 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
 
 ---
 
-## Strategy Comparison & Theory
+## The 6 Attack Strategies Explained
 
-### 1. The Parity Principle (Checkerboard Hunt)
-In standard Hasbro Battleship, the smallest ship in the fleet is the **Destroyer** (length 2). Any horizontal or vertical placement of length $\ge 2$ occupies cells of alternating parity:
-$$\text{parity}(r, c) = (r + c) \pmod 2$$
+### 1. `Random + Hunt/Target` (`random_hunt`)
+- **Hunt**: Uniformly samples from all unshot cells.
+- **Target**: Once a hit occurs, switches to smart collinear and orthogonal hunt-down.
 
-Because consecutive steps alternate parity:
-- $(r, c) \to (r, c+1) \implies (r + c + 1) \not\equiv (r + c) \pmod 2$
-- $(r, c) \to (r+1, c) \implies (r + 1 + c) \not\equiv (r + c) \pmod 2$
+### 2. `Checkerboard + Hunt/Target` (`checkerboard`)
+- **Hunt**: Fires exclusively at cells matching $(r + c) \pmod 2 = \text{parity}$.
+- **Theory**: The smallest ship is the Destroyer (length 2). Every ship of length $\ge 2$ intersects the checkerboard parity grid, halving the hunt search space from 100 to 50 cells.
 
-Every ship must cover at least one cell where $(r + c) \pmod 2 = 0$ and at least one where $(r + c) \pmod 2 = 1$. By hunting exclusively on a single parity, the search space is immediately halved from **100 cells to 50 cells** without sacrificing the guarantee of locating every ship.
+### 3. `Largest Empty Rect Midpoint` (`largest_rect`)
+- **Hunt**: Computes a 2D prefix-sum of shot cells to find the largest axis-aligned rectangle $(r_0..=r_1, c_0..=c_1)$ consisting entirely of unshot cells. Breaks ties by preferring square-like rectangles ($\max(\min(H, W))$). Fires at the midpoint $((r_0 + r_1)/2, (c_0 + c_1)/2)$.
+- **Theory**: The center of the largest unexplored region is statistically the most likely to contain undiscovered ship segments.
 
-### 2. Smart Collinear Targeting
-Once a hit is registered, the strategy switches to **Target Mode**:
-1. **Collinear Priority**: If two or more active hits lie along the same row or column and are contiguous, the next shot is prioritized at the immediate unshot endpoints along that line.
-2. **Orthogonal Fallback**: If endpoints are blocked (board boundary or known misses), the strategy falls back to orthogonal neighbors (`N, S, E, W`) of all active hits.
-3. **Multi-Ship Resolution**: When a ship of length $L$ is sunk, the $L$ collinear cells matching the sunk ship containing the final shot are pruned from the active hit pool. Any remaining hits on touching or parallel ships remain active and continue being targeted.
+### 4. `Adaptive Stride (2->3->4->5)` (`adaptive_stride`)
+- **Hunt**: Observes $k = \text{min\_remaining\_ship\_len()}$. While Destroyer is unsunk, $k=2$ (fires on stride 2). Once Destroyer sinks, $k=3$ (fires on stride 3). When Cruiser/Submarine sink, $k=4$, and finally $k=5$ when only Carrier remains.
+- **Theory**: Adapts sampling density dynamically as small ships are eliminated.
 
-### Benchmark Results (1,000 Games per Strategy, `seed = 42`)
+### 5. `Staggered Stride (4->2)` (`stride4_to_2`)
+- **Hunt**: While Carrier (5) or Battleship (4) are afloat, fires on a staggered 4-stride grid $(r + c) \pmod 4 = \text{offset}_4$. Once both 4 and 5 are sunk, tightens to a 2-stride checkerboard $(r + c) \pmod 2 = (\text{offset}_4 \pmod 2)$.
+- **Theory**: All 4-stride shots are naturally aligned with the 2-stride checkerboard, wasting zero shots while discovering the capital ships early.
 
-| Metric | Random + Hunt/Target | Checkerboard + Hunt/Target |
-| :--- | :---: | :---: |
-| **Mean Turns to Win** | 60.88 | **52.38** (8.50 turns faster) |
-| **Median Turns (`P50`)** | 60.0 | **53.0** |
-| **Standard Deviation ($\sigma$)** | 15.31 | **9.34** (-39.0% variance) |
-| **P10 (Fastest 10%)** | 40 turns | **40 turns** |
-| **P90 (Slowest 10%)** | 82 turns | **62 turns** (20 turns faster) |
-| **Games $\ge 65$ Turns** | 40.8% | **3.7%** (11× fewer long games) |
-| **Head-to-Head Win Rate** | 32.2% (322 wins) | **67.8% (678 wins)** |
+### 6. `Largest Rect + Stride (4->2)` (`rect_stride4`)
+- **Hunt**: Combines the geometric discovery of the largest empty rectangle with the active 4-to-2 stride. Locates the largest unshot rectangle and fires at the unshot stride cell closest to its center.
+- **Theory**: Highest-ranking strategy in tournament benchmarks, blending macro space partitioning with micro parity alignment.
+
+---
+
+## Benchmark & Tournament Results
+
+```
+================================================================================
+                     BATTLESHIP ENGINE BENCHMARK REPORT                         
+================================================================================
+Games simulated: 400 solo per strategy | Tournament: 400 duels per pair | Base Seed: 42
+
+STRATEGY PERFORMANCE (Turns to sink all 17 ship cells):
++-----------------------------------+-------+--------+-----+-----+-------+-----+-----+
+| Strategy                          | Mean  | Median | Min | Max | StDev | P10 | P90 |
++-----------------------------------+-------+--------+-----+-----+-------+-----+-----+
+| Random + Hunt/Target              |  60.2 |   59.0 |  27 |  98 | 15.37 |  41 |  81 |
+| Checkerboard + Hunt/Target        |  52.4 |   53.5 |  22 |  99 |  9.53 |  40 |  63 |
+| Largest Empty Rect Midpoint       |  53.1 |   53.0 |  22 |  99 | 11.55 |  39 |  67 |
+| Adaptive Stride (2->3->4->5)      |  50.5 |   50.5 |  26 |  73 |  9.06 |  38 |  61 |
+| Staggered Stride (4->2)           |  51.9 |   53.0 |  26 |  99 | 11.27 |  38 |  63 |
+| Largest Rect + Stride (4->2)      |  48.3 |   48.0 |  25 | 100 | 10.19 |  37 |  59 |
++-----------------------------------+-------+--------+-----+-----+-------+-----+-----+
+
+================================================================================
+                     6x6 HEAD-TO-HEAD WIN RATE MATRIX (%)                       
+================================================================================
+Columns indicate the opponent. Value is the row strategy's win % against column.
+  [1] Random + Hunt/Target            [2] Checkerboard + Hunt/Target
+  [3] Largest Empty Rect Midpoint     [4] Adaptive Stride (2->3->4->5)
+  [5] Staggered Stride (4->2)         [6] Largest Rect + Stride (4->2)
+
++-----------------------------------+--------+--------+--------+--------+--------+--------+
+| Strategy                          |  [1]   |  [2]   |  [3]   |  [4]   |  [5]   |  [6]   |
++-----------------------------------+--------+--------+--------+--------+--------+--------+
+| [1] Random + Hunt/Target           |   ---  |  31.8% |  35.2% |  30.2% |  28.0% |  23.2% |
+| [2] Checkerboard + Hunt/Target     |  68.2% |   ---  |  50.0% |  46.5% |  47.8% |  33.8% |
+| [3] Largest Empty Rect Midpoint    |  64.8% |  50.0% |   ---  |  43.5% |  43.0% |  35.5% |
+| [4] Adaptive Stride (2->3->4->5)   |  69.8% |  53.5% |  56.5% |   ---  |  46.0% |  38.0% |
+| [5] Staggered Stride (4->2)        |  72.0% |  52.2% |  57.0% |  54.0% |   ---  |  42.8% |
+| [6] Largest Rect + Stride (4->2)   |  76.8% |  66.2% |  64.5% |  62.0% |  57.2% |   ---  |
++-----------------------------------+--------+--------+--------+--------+--------+--------+
+
+================================================================================
+                 OVERALL TOURNAMENT STANDINGS (ALL-PAIRS DUELS)                 
+================================================================================
++------+-----------------------------------+---------+-------+--------+---------------+
+| Rank | Strategy                          | Matches |  Wins | Losses | Overall Win % |
++------+-----------------------------------+---------+-------+--------+---------------+
+|    1 | Largest Rect + Stride (4->2)      |    2000 |  1307 |    693 |         65.3% |
+|    2 | Staggered Stride (4->2)           |    2000 |  1112 |    888 |         55.6% |
+|    3 | Adaptive Stride (2->3->4->5)      |    2000 |  1055 |    945 |         52.8% |
+|    4 | Checkerboard + Hunt/Target        |    2000 |   985 |   1015 |         49.2% |
+|    5 | Largest Empty Rect Midpoint       |    2000 |   947 |   1053 |         47.3% |
+|    6 | Random + Hunt/Target              |    2000 |   594 |   1406 |         29.7% |
++------+-----------------------------------+---------+-------+--------+---------------+
+```
 
 ---
 
 ## CLI Usage
 
-### 1. Run Strategy Benchmark (`simulate`)
-Simulates $N$ games (default: 1,000) for both strategies, prints a formatted summary table and ASCII histogram, and outputs `viewer/sample_data.js`:
+### 1. Run Strategy Benchmark & Tournament (`simulate`)
+Simulates $N$ games (default: 1,000) for all 6 strategies and executes a complete 6x6 round-robin tournament, printing formatted tables, the 6x6 matrix, standings, and ASCII histograms:
 
 ```bash
 cargo run --release -- simulate --games 1000 --seed 42
 ```
 
-Example terminal output:
-```
-================================================================================
-                     BATTLESHIP ENGINE BENCHMARK REPORT                         
-================================================================================
-Games simulated: 1000 per strategy | Base Seed: 42
-
-STRATEGY PERFORMANCE (Turns to sink all 17 ship cells):
-+----------------------------+-------+--------+-----+-----+-------+-----+-----+
-| Strategy                   | Mean  | Median | Min | Max | StDev | P10 | P90 |
-+----------------------------+-------+--------+-----+-----+-------+-----+-----+
-| Random + Hunt/Target       |  60.9 |   60.0 |  27 |  98 | 15.31 |  40 |  82 |
-| Checkerboard + Hunt/Target |  52.4 |   53.0 |  22 |  99 |  9.34 |  40 |  62 |
-+----------------------------+-------+--------+-----+-----+-------+-----+-----+
-
-HEAD-TO-HEAD MATCHUP RESULTS (1000 games):
-  Random + Hunt/Target         :  322 wins ( 32.2%)
-  Checkerboard + Hunt/Target   :  678 wins ( 67.8%)
-```
-
 ### 2. Run a Single Match (`match`)
-Simulates a single head-to-head match and streams the complete JSON replay to stdout:
+Simulates a single head-to-head match between any pair of strategies and streams the complete JSON replay to stdout:
 
 ```bash
-cargo run -- match --p1 random_hunt --p2 checkerboard --seed 123
+cargo run -- match --p1 rect_stride4 --p2 checkerboard --seed 123
 ```
+
+Available strategy IDs:
+- `random_hunt`
+- `checkerboard`
+- `largest_rect`
+- `adaptive_stride`
+- `stride4_to_2`
+- `rect_stride4`
 
 ### 3. Launch HTTP Server & Web Viewer (`serve`)
 Starts the built-in HTTP server on `127.0.0.1:8080`:
@@ -126,14 +170,12 @@ Navigate to `http://127.0.0.1:8080/` in your browser to inspect matches turn-by-
 
 ## REST API Endpoints
 
-The built-in HTTP server exposes REST API endpoints with CORS support:
-
 ### `GET /api/match`
 Generate a fresh head-to-head match replay:
 - Query parameters:
-  - `p1`: Strategy for Player 1 (`random_hunt` or `checkerboard`, default: `random_hunt`)
-  - `p2`: Strategy for Player 2 (`random_hunt` or `checkerboard`, default: `checkerboard`)
-  - `seed`: 64-bit integer seed (optional, defaults to system wall-clock time)
+  - `p1`: Strategy for Player 1 (default: `random_hunt`)
+  - `p2`: Strategy for Player 2 (default: `checkerboard`)
+  - `seed`: 64-bit integer seed (optional)
 - Response: `application/json` with complete ship placements, turn-by-turn shot coordinates, outcomes, AI modes, and winner.
 
 ### `GET /api/benchmark`
@@ -141,13 +183,13 @@ Run an on-demand statistical benchmark:
 - Query parameters:
   - `games`: Number of games per strategy (default: 200, max: 5000)
   - `seed`: 64-bit integer seed (optional)
-- Response: `application/json` with distributions, percentiles, histograms, and head-to-head win counts.
+- Response: `application/json` with 6-strategy distributions, percentiles, histograms, 6x6 head-to-head tournament matrix, pairings, and standings.
 
 ---
 
 ## Testing & Quality Assurance
 
-Run the comprehensive unit test suite:
+Run the unit test suite:
 
 ```bash
 cargo test
@@ -156,9 +198,9 @@ cargo test
 Test coverage includes:
 - **`rng::tests`**: Determinism, reproducibility across seeds, uniform bounds checking, Fisher-Yates shuffle validation.
 - **`game::tests`**: Hasbro ship length checks, 17 total cells, legal placement, out-of-bounds rejection, overlapping placement rejection, shot damage and sinking detection, tracking board updates.
-- **`strategy::tests`**: Fleet placement legality, single-player game completion in $\le 100$ turns, smart collinear targeting priority.
-- **`sim::tests`**: Head-to-head match completion, JSON serialization integrity, statistical proof that Checkerboard outperforms Random Hunt.
-- **`server::tests`**: HTTP query string parser, strategy instantiation.
+- **`strategy::tests`**: Fleet placement legality, single-player game completion in $\le 100$ turns for all 6 strategies, smart collinear targeting priority, 2D prefix-sum empty rectangle detection.
+- **`sim::tests`**: Head-to-head match completion, JSON serialization integrity, 6x6 tournament matrix and standings verification, statistical proof that Checkerboard outperforms Random Hunt.
+- **`server::tests`**: HTTP query string parser, strategy instantiation for all 6 strategy IDs.
 
 ---
 
