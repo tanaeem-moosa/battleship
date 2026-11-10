@@ -48,6 +48,8 @@ SUBCOMMANDS:
                                            - rect_checkerboard ("Largest Rect + Checkerboard")
                                            - monte_carlo       ("Monte Carlo Sampling")
                                            - bayesian_pdf      ("Bayesian Probability Density")
+                                           - crosshair_stride  ("Crosshair Stride + Open-Target")
+                                           - crosshair_5432    ("Crosshair Stride (5->4->3->2)")
 
                           --d1 <DEF>     Player 1 defense strategy (default: random)
                           --d2 <DEF>     Player 2 defense strategy (default: random)
@@ -132,6 +134,8 @@ fn run_simulate_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Pre-generate diverse sample matches showcasing all strategies and defenses for the browser viewer:
     let sample_configs = [
+        ("Crosshair Stride + Open-Target", "crosshair_stride", "bait_and_hide", "Bayesian Probability Density", "bayesian_pdf", "spaced", seed + 808),
+        ("Crosshair Stride (5->4->3->2)", "crosshair_5432", "corner_edge", "Monte Carlo Sampling", "monte_carlo", "anti_midpoint", seed + 909),
         ("Bayesian Probability Density", "bayesian_pdf", "spaced", "Monte Carlo Sampling", "monte_carlo", "anti_midpoint", seed + 505),
         ("Bayesian Probability Density", "bayesian_pdf", "corner_edge", "Largest Rect + Stride (4->2)", "rect_stride4", "clustered", seed + 101),
         ("Monte Carlo Sampling", "monte_carlo", "bait_and_hide", "Largest Rect + Stride (5->4->3->2)", "rect_stride_5432", "spaced", seed + 606),

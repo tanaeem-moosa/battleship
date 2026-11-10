@@ -16,10 +16,11 @@ use crate::rng::Rng;
 use crate::sim::{run_benchmark, simulate_match};
 use crate::strategy::{
     AdaptiveStrideUpAttack, AntiMidpointDefense, AttackStrategy, BaitAndHideDefense,
-    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense, DefenseStrategy,
-    DescendingStrideAttack, HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack,
-    ParallelLanesDefense, RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack,
-    RectStrideFourAttack, SpacedDefense, StaggeredFourToTwoAttack,
+    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense,
+    CrosshairDescendingAttack, CrosshairStrideAttack, DefenseStrategy, DescendingStrideAttack,
+    HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack, ParallelLanesDefense,
+    RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack, RectStrideFourAttack,
+    SpacedDefense, StaggeredFourToTwoAttack,
 };
 
 /// Instantiate an attack strategy from its CLI / URL string identifier.
@@ -69,9 +70,17 @@ pub fn create_strategy(id: &str) -> (Box<dyn AttackStrategy>, &'static str) {
             Box::new(BayesianPdfAttack::new()),
             "Bayesian Probability Density",
         ),
+        "crosshair_stride" | "crosshair" | "cross" | "open_target" => (
+            Box::new(CrosshairStrideAttack::new()),
+            "Crosshair Stride + Open-Target",
+        ),
+        "crosshair_5432" | "crosshair_descending" | "crosshair5432" => (
+            Box::new(CrosshairDescendingAttack::new()),
+            "Crosshair Stride (5->4->3->2)",
+        ),
         _ => (
-            Box::new(BayesianPdfAttack::new()),
-            "Bayesian Probability Density",
+            Box::new(CrosshairDescendingAttack::new()),
+            "Crosshair Stride (5->4->3->2)",
         ),
     }
 }
@@ -434,6 +443,14 @@ mod tests {
         let (s11, name11) = create_strategy("bayesian_pdf");
         assert_eq!(name11, "Bayesian Probability Density");
         assert_eq!(s11.current_mode(), "bayesian_pdf");
+
+        let (s12, name12) = create_strategy("crosshair_stride");
+        assert_eq!(name12, "Crosshair Stride + Open-Target");
+        assert_eq!(s12.current_mode(), "crosshair_stride");
+
+        let (s13, name13) = create_strategy("crosshair_5432");
+        assert_eq!(name13, "Crosshair Stride (5->4->3->2)");
+        assert_eq!(s13.current_mode(), "crosshair_5432");
     }
 
     #[test]

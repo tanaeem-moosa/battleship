@@ -13,14 +13,15 @@ use crate::game::{
 use crate::rng::Rng;
 use crate::strategy::{
     AdaptiveStrideUpAttack, AntiMidpointDefense, AttackStrategy, BaitAndHideDefense,
-    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense, DefenseStrategy,
-    DescendingStrideAttack, HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack,
-    ParallelLanesDefense, RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack,
-    RectStrideFourAttack, SpacedDefense, StaggeredFourToTwoAttack,
+    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense,
+    CrosshairDescendingAttack, CrosshairStrideAttack, DefenseStrategy, DescendingStrideAttack,
+    HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack, ParallelLanesDefense,
+    RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack, RectStrideFourAttack,
+    SpacedDefense, StaggeredFourToTwoAttack,
 };
 
 /// Total number of implemented attack strategies in the benchmark suite.
-pub const NUM_STRATEGIES: usize = 11;
+pub const NUM_STRATEGIES: usize = 13;
 /// Total number of implemented defense strategies in the benchmark suite.
 pub const NUM_DEFENSES: usize = 7;
 
@@ -108,7 +109,7 @@ pub struct HeadToHeadMatrix {
     pub standings: Vec<TournamentStanding>,
 }
 
-/// Comprehensive 7-Defense Evaluation: 7x11 survival matrix against all 11 attackers
+/// Comprehensive 7-Defense Evaluation: 7x13 survival matrix against all 13 attackers
 /// and a complete 7x7 round-robin defense tournament.
 #[derive(Clone, Debug)]
 pub struct DefenseEvaluation {
@@ -116,7 +117,7 @@ pub struct DefenseEvaluation {
     pub defense_names: Vec<String>,
     pub attacker_ids: Vec<String>,
     pub attacker_names: Vec<String>,
-    pub survival_matrix: Vec<Vec<f64>>, // 7x11: matrix[d][a] is mean turns survived by defense d vs attacker a
+    pub survival_matrix: Vec<Vec<f64>>, // 7x13: matrix[d][a] is mean turns survived by defense d vs attacker a
     pub defense_stats: Vec<StrategyStats>, // 7 defense overall stats
     pub tournament: HeadToHeadMatrix, // 7x7 defense tournament
 }
@@ -416,10 +417,20 @@ pub fn create_strategy_instance(
             "bayesian_pdf",
             "Bayesian Probability Density",
         ),
+        11 => (
+            Box::new(CrosshairStrideAttack::new()),
+            "crosshair_stride",
+            "Crosshair Stride + Open-Target",
+        ),
+        12 => (
+            Box::new(CrosshairDescendingAttack::new()),
+            "crosshair_5432",
+            "Crosshair Stride (5->4->3->2)",
+        ),
         _ => (
-            Box::new(BayesianPdfAttack::new()),
-            "bayesian_pdf",
-            "Bayesian Probability Density",
+            Box::new(CrosshairDescendingAttack::new()),
+            "crosshair_5432",
+            "Crosshair Stride (5->4->3->2)",
         ),
     }
 }
@@ -440,15 +451,15 @@ pub fn create_defense_instance(
 }
 
 /// Execute a full benchmark over `games` iterations:
-/// 1. Evaluates all 11 strategies in solo simulation
-/// 2. Executes a complete 11x11 All-Pairs Head-to-Head Tournament alternating first-turn player
-/// 3. Evaluates all 7 Defenses x 11 Attackers Survival Matrix (77 cells)
+/// 1. Evaluates all 13 strategies in solo simulation
+/// 2. Executes a complete 13x13 All-Pairs Head-to-Head Tournament alternating first-turn player
+/// 3. Evaluates all 7 Defenses x 13 Attackers Survival Matrix (91 cells)
 /// 4. Executes a complete 7x7 Defense Head-to-Head Tournament
 pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
     let mut rng = Rng::with_seed(seed);
     let mut defense = RandomDefense::new();
 
-    // 1. Evaluate all 11 strategies solo
+    // 1. Evaluate all 13 strategies solo
     let mut strategies = Vec::with_capacity(NUM_STRATEGIES);
     for idx in 0..NUM_STRATEGIES {
         let (mut strat, id, name) = create_strategy_instance(idx);
@@ -459,7 +470,7 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
         strategies.push(compute_stats(id, name, turns));
     }
 
-    // 2. Complete 11x11 All-Pairs Head-to-Head Tournament (55 distinct pairings)
+    // 2. Complete 13x13 All-Pairs Head-to-Head Tournament (78 distinct pairings)
     let battles_per_pair = games.min(400);
     let mut win_counts = vec![vec![0usize; NUM_STRATEGIES]; NUM_STRATEGIES];
     let num_pairings = NUM_STRATEGIES * (NUM_STRATEGIES - 1) / 2;
@@ -529,7 +540,7 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
         }
     }
 
-    // 3. Build 11x11 Win Rate Matrix (percentages)
+    // 3. Build 13x13 Win Rate Matrix (percentages)
     let mut matrix = vec![vec![50.0; NUM_STRATEGIES]; NUM_STRATEGIES];
     for i in 0..NUM_STRATEGIES {
         for j in 0..NUM_STRATEGIES {
@@ -584,7 +595,7 @@ pub fn run_benchmark(games: usize, seed: u64) -> BenchmarkReport {
         standings,
     };
 
-    // 5. Complete 7 Defenses x 11 Attackers Survival Matrix (77 cells)
+    // 5. Complete 7 Defenses x 13 Attackers Survival Matrix (91 cells)
     let cell_games = (games / 10).max(10).min(50);
     let mut survival_matrix = vec![vec![0.0; NUM_STRATEGIES]; NUM_DEFENSES];
     let mut defense_stats = Vec::with_capacity(NUM_DEFENSES);
@@ -1057,7 +1068,7 @@ impl BenchmarkReport {
         let def_tourn_json = self.defense_eval.tournament.to_json();
 
         format!(
-            "{{\"games\":{},\"games_per_strategy\":{},\"seed\":{},\"strategies\":{{\"random_hunt\":{},\"random\":{},\"checkerboard_hunt\":{},\"checkerboard\":{},\"largest_rect\":{},\"adaptive_stride\":{},\"stride4_to_2\":{},\"rect_stride4\":{},\"stride_5432\":{},\"rect_stride_5432\":{},\"rect_checkerboard\":{},\"monte_carlo\":{},\"bayesian_pdf\":{},\"strategy_list\":[{}]}},\"head_to_head\":{{\"p1_name\":{},\"p2_name\":{},\"total_games\":{},\"p1_wins\":{},\"p2_wins\":{},\"p1_win_rate\":{:.4},\"p2_win_rate\":{:.4},\"checkerboard_wins\":{},\"random_wins\":{},\"checkerboard_win_rate\":{:.1},\"random_win_rate\":{:.1}}},\"head_to_head_matrix\":{},\"tournament\":{},\"defense_eval\":{},\"defense_evaluation\":{},\"defense_tournament\":{}}}",
+            "{{\"games\":{},\"games_per_strategy\":{},\"seed\":{},\"strategies\":{{\"random_hunt\":{},\"random\":{},\"checkerboard_hunt\":{},\"checkerboard\":{},\"largest_rect\":{},\"adaptive_stride\":{},\"stride4_to_2\":{},\"rect_stride4\":{},\"stride_5432\":{},\"rect_stride_5432\":{},\"rect_checkerboard\":{},\"monte_carlo\":{},\"bayesian_pdf\":{},\"crosshair_stride\":{},\"crosshair_5432\":{},\"strategy_list\":[{}]}},\"head_to_head\":{{\"p1_name\":{},\"p2_name\":{},\"total_games\":{},\"p1_wins\":{},\"p2_wins\":{},\"p1_win_rate\":{:.4},\"p2_win_rate\":{:.4},\"checkerboard_wins\":{},\"random_wins\":{},\"checkerboard_win_rate\":{:.1},\"random_win_rate\":{:.1}}},\"head_to_head_matrix\":{},\"tournament\":{},\"defense_eval\":{},\"defense_evaluation\":{},\"defense_tournament\":{}}}",
             self.games_per_strategy,
             self.games_per_strategy,
             self.seed,
@@ -1074,6 +1085,8 @@ impl BenchmarkReport {
             s[8],
             s[9],
             s[10],
+            s[11],
+            s[12],
             strats_list.join(","),
             json_str(&self.head_to_head.p1_name),
             json_str(&self.head_to_head.p2_name),
@@ -1125,7 +1138,7 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
     println!("+-----------------------------------+-------+--------+-----+-----+-------+-----+-----+");
     println!();
     println!("=========================================================================================================");
-    println!("                             11x11 ATTACK HEAD-TO-HEAD WIN RATE MATRIX (%)                               ");
+    println!("                             13x13 ATTACK HEAD-TO-HEAD WIN RATE MATRIX (%)                               ");
     println!("=========================================================================================================");
     println!("Columns indicate opponent. Value is row strategy's win % against column.");
     for (i, name) in report.tournament.strategy_names.iter().enumerate() {
@@ -1139,9 +1152,9 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
         println!();
     }
     println!();
-    println!("+-----------------------------------+------+------+------+------+------+------+------+------+------+------+------+");
-    println!("| Strategy                          |  [1] |  [2] |  [3] |  [4] |  [5] |  [6] |  [7] |  [8] |  [9] | [10] | [11] |");
-    println!("+-----------------------------------+------+------+------+------+------+------+------+------+------+------+------+");
+    println!("+-----------------------------------+------+------+------+------+------+------+------+------+------+------+------+------+------+");
+    println!("| Strategy                          |  [1] |  [2] |  [3] |  [4] |  [5] |  [6] |  [7] |  [8] |  [9] | [10] | [11] | [12] | [13] |");
+    println!("+-----------------------------------+------+------+------+------+------+------+------+------+------+------+------+------+------+");
     for (i, name) in report.tournament.strategy_names.iter().enumerate() {
         print!("| [{:>2}] {:<29} |", i + 1, name);
         for j in 0..report.tournament.matrix.len() {
@@ -1154,7 +1167,7 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
         }
         println!();
     }
-    println!("+-----------------------------------+------+------+------+------+------+------+------+------+------+------+------+");
+    println!("+-----------------------------------+------+------+------+------+------+------+------+------+------+------+------+------+------+");
     println!();
     println!("=========================================================================================================");
     println!("                          OVERALL ATTACK TOURNAMENT STANDINGS (ALL-PAIRS DUELS)                          ");
@@ -1171,7 +1184,7 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
     println!("+------+-----------------------------------+---------+-------+--------+---------------+");
     println!();
     println!("=========================================================================================================");
-    println!("            7 DEFENSES x 11 ATTACKERS SURVIVAL MATRIX (Mean Turns Survived - Higher is Better)           ");
+    println!("            7 DEFENSES x 13 ATTACKERS SURVIVAL MATRIX (Mean Turns Survived - Higher is Better)           ");
     println!("=========================================================================================================");
     println!("Values indicate mean turns survived by defense against each attacker. Higher values = tougher defense.");
     for (i, name) in report.defense_eval.defense_names.iter().enumerate() {
@@ -1185,9 +1198,9 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
         println!();
     }
     println!();
-    println!("+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+");
-    println!("| Defense Strategy                  | A1  | A2  | A3  | A4  | A5  | A6  | A7  | A8  | A9  | A10 | A11 | Overall |");
-    println!("+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+");
+    println!("+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+");
+    println!("| Defense Strategy                  | A1  | A2  | A3  | A4  | A5  | A6  | A7  | A8  | A9  | A10 | A11 | A12 | A13 | Overall |");
+    println!("+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+");
     for (d, name) in report.defense_eval.defense_names.iter().enumerate() {
         print!("| [D{}] {:<30} |", d + 1, name);
         for a in 0..report.defense_eval.survival_matrix[d].len() {
@@ -1197,7 +1210,7 @@ pub fn print_benchmark_summary(report: &BenchmarkReport) {
         let overall = report.defense_eval.defense_stats[d].mean;
         println!("  {:>5.1}  |", overall);
     }
-    println!("+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+");
+    println!("+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+");
     println!();
     println!("=========================================================================================================");
     println!("                                7x7 DEFENSE TOURNAMENT WIN RATE MATRIX (%)                               ");
@@ -1314,13 +1327,13 @@ mod tests {
     #[test]
     fn test_benchmark_checkerboard_outperforms_random_hunt() {
         let report = run_benchmark(20, 888);
-        assert_eq!(report.strategies.len(), 11);
-        assert_eq!(report.tournament.matrix.len(), 11);
-        assert_eq!(report.tournament.standings.len(), 11);
-        assert_eq!(report.tournament.pairings.len(), 55);
+        assert_eq!(report.strategies.len(), 13);
+        assert_eq!(report.tournament.matrix.len(), 13);
+        assert_eq!(report.tournament.standings.len(), 13);
+        assert_eq!(report.tournament.pairings.len(), 78);
 
         assert_eq!(report.defense_eval.survival_matrix.len(), 7);
-        assert_eq!(report.defense_eval.survival_matrix[0].len(), 11);
+        assert_eq!(report.defense_eval.survival_matrix[0].len(), 13);
         assert_eq!(report.defense_eval.tournament.matrix.len(), 7);
         assert_eq!(report.defense_eval.tournament.standings.len(), 7);
         assert_eq!(report.defense_eval.tournament.pairings.len(), 21);
@@ -1342,6 +1355,8 @@ mod tests {
         assert!(json.contains("\"head_to_head_matrix\""));
         assert!(json.contains("\"bayesian_pdf\""));
         assert!(json.contains("\"monte_carlo\""));
+        assert!(json.contains("\"crosshair_stride\""));
+        assert!(json.contains("\"crosshair_5432\""));
         assert!(json.contains("\"defense_evaluation\""));
         assert!(json.contains("\"survival_matrix\""));
         assert!(json.contains("\"defense_tournament\""));

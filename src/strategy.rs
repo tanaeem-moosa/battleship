@@ -2538,6 +2538,481 @@ impl AttackStrategy for BayesianPdfAttack {
     }
 }
 
+/// Count consecutive Unknown cells from (r, c) in direction (dr, dc), up to `max_steps`.
+pub fn count_arm(view: &TrackingBoard, r: usize, c: usize, dr: isize, dc: isize, max_steps: usize) -> usize {
+    let mut steps = 0;
+    let mut cr = r as isize + dr;
+    let mut cc = c as isize + dc;
+    while steps < max_steps && cr >= 0 && cr < HEIGHT as isize && cc >= 0 && cc < WIDTH as isize {
+        if view.cell(cr as usize, cc as usize) == TrackingCell::Unknown {
+            steps += 1;
+            cr += dr;
+            cc += dc;
+        } else {
+            break;
+        }
+    }
+    steps
+}
+
+/// Helper to evaluate crosshair combinatorial score for candidate cell (r, c).
+pub fn evaluate_crosshair_score(
+    view: &TrackingBoard,
+    r: usize,
+    c: usize,
+    max_len: usize,
+    min_len: usize,
+) -> usize {
+    let up = count_arm(view, r, c, -1, 0, max_len - 1);
+    let down = count_arm(view, r, c, 1, 0, max_len - 1);
+    let left = count_arm(view, r, c, 0, -1, max_len - 1);
+    let right = count_arm(view, r, c, 0, 1, max_len - 1);
+
+    // Exact number of ways `max_len` AND `min_len` ships can cover (r, c):
+    let h_ways_max = if left + right + 1 >= max_len {
+        left + right + 2 - max_len
+    } else {
+        0
+    };
+    let v_ways_max = if up + down + 1 >= max_len {
+        up + down + 2 - max_len
+    } else {
+        0
+    };
+    let h_ways_min = if left.min(min_len - 1) + right.min(min_len - 1) + 1 >= min_len {
+        left.min(min_len - 1) + right.min(min_len - 1) + 2 - min_len
+    } else {
+        0
+    };
+    let v_ways_min = if up.min(min_len - 1) + down.min(min_len - 1) + 1 >= min_len {
+        up.min(min_len - 1) + down.min(min_len - 1) + 2 - min_len
+    } else {
+        0
+    };
+
+    (h_ways_max + v_ways_max) * 3 + (h_ways_min + v_ways_min)
+}
+
+/// Choose next target shot using Open-Side Target logic on active hits.
+pub fn choose_open_side_target(
+    active_hits: &[(usize, usize)],
+    view: &TrackingBoard,
+    rng: &mut Rng,
+) -> Option<(usize, usize)> {
+    if active_hits.is_empty() {
+        return None;
+    }
+    let min_len = view.min_remaining_ship_len().max(2);
+    let max_len = view.max_remaining_ship_len().max(2);
+
+    // Check for contiguous collinear chains of length >= 2
+    let mut best_collinear: Vec<((usize, usize), usize)> = Vec::new();
+
+    for &(r, c) in active_hits {
+        // Horizontal chain starting at (r, c)
+        if c == 0 || !active_hits.contains(&(r, c - 1)) {
+            let mut end_c = c;
+            while end_c + 1 < WIDTH && active_hits.contains(&(r, end_c + 1)) {
+                end_c += 1;
+            }
+            let chain_len = end_c - c + 1;
+            if chain_len >= 2 {
+                let left_open = if c > 0 && view.is_unshot(r, c - 1) {
+                    1 + count_arm(view, r, c - 1, 0, -1, max_len)
+                } else {
+                    0
+                };
+                let right_open = if end_c + 1 < WIDTH && view.is_unshot(r, end_c + 1) {
+                    1 + count_arm(view, r, end_c + 1, 0, 1, max_len)
+                } else {
+                    0
+                };
+                if left_open + chain_len + right_open >= min_len {
+                    if left_open > 0 {
+                        best_collinear.push(((r, c - 1), left_open * 10 + right_open));
+                    }
+                    if right_open > 0 {
+                        best_collinear.push(((r, end_c + 1), right_open * 10 + left_open));
+                    }
+                }
+            }
+        }
+        // Vertical chain starting at (r, c)
+        if r == 0 || !active_hits.contains(&(r - 1, c)) {
+            let mut end_r = r;
+            while end_r + 1 < HEIGHT && active_hits.contains(&(end_r + 1, c)) {
+                end_r += 1;
+            }
+            let chain_len = end_r - r + 1;
+            if chain_len >= 2 {
+                let up_open = if r > 0 && view.is_unshot(r - 1, c) {
+                    1 + count_arm(view, r - 1, c, -1, 0, max_len)
+                } else {
+                    0
+                };
+                let down_open = if end_r + 1 < HEIGHT && view.is_unshot(end_r + 1, c) {
+                    1 + count_arm(view, end_r + 1, c, 1, 0, max_len)
+                } else {
+                    0
+                };
+                if up_open + chain_len + down_open >= min_len {
+                    if up_open > 0 {
+                        best_collinear.push(((r - 1, c), up_open * 10 + down_open));
+                    }
+                    if down_open > 0 {
+                        best_collinear.push(((end_r + 1, c), down_open * 10 + up_open));
+                    }
+                }
+            }
+        }
+    }
+
+    if !best_collinear.is_empty() {
+        let max_score = best_collinear.iter().map(|x| x.1).max().unwrap();
+        let top: Vec<(usize, usize)> = best_collinear
+            .into_iter()
+            .filter(|x| x.1 == max_score)
+            .map(|x| x.0)
+            .collect();
+        return top.get(rng.next_usize(top.len())).copied();
+    }
+
+    // Single hit (or blocked collinear): score all 4 orthogonal neighbors by open runway!
+    let mut candidates: Vec<((usize, usize), usize)> = Vec::new();
+    for &(r, c) in active_hits {
+        let up = count_arm(view, r, c, -1, 0, max_len - 1);
+        let down = count_arm(view, r, c, 1, 0, max_len - 1);
+        let left = count_arm(view, r, c, 0, -1, max_len - 1);
+        let right = count_arm(view, r, c, 0, 1, max_len - 1);
+
+        let v_span = up + 1 + down;
+        let h_span = left + 1 + right;
+
+        if v_span >= min_len {
+            if r > 0 && view.is_unshot(r - 1, c) {
+                candidates.push(((r - 1, c), up * 10 + v_span));
+            }
+            if r + 1 < HEIGHT && view.is_unshot(r + 1, c) {
+                candidates.push(((r + 1, c), down * 10 + v_span));
+            }
+        }
+        if h_span >= min_len {
+            if c > 0 && view.is_unshot(r, c - 1) {
+                candidates.push(((r, c - 1), left * 10 + h_span));
+            }
+            if c + 1 < WIDTH && view.is_unshot(r, c + 1) {
+                candidates.push(((r, c + 1), right * 10 + h_span));
+            }
+        }
+    }
+
+    if !candidates.is_empty() {
+        let max_score = candidates.iter().map(|x| x.1).max().unwrap();
+        let top: Vec<(usize, usize)> = candidates
+            .into_iter()
+            .filter(|x| x.1 == max_score)
+            .map(|x| x.0)
+            .collect();
+        return top.get(rng.next_usize(top.len())).copied();
+    }
+
+    None
+}
+
+/// Remove sunk ship's hits from `active_hits` list.
+pub fn remove_sunk_hits(
+    active_hits: &mut Vec<(usize, usize)>,
+    pos: (usize, usize),
+    kind: ShipKind,
+) {
+    if !active_hits.contains(&pos) {
+        active_hits.push(pos);
+    }
+    let ship_len = kind.length();
+    if active_hits.len() <= ship_len {
+        active_hits.clear();
+        return;
+    }
+    let (sr, sc) = pos;
+    let mut h_chain = vec![pos];
+    let mut c = sc;
+    while c > 0 && active_hits.contains(&(sr, c - 1)) && h_chain.len() < ship_len {
+        c -= 1;
+        h_chain.push((sr, c));
+    }
+    c = sc;
+    while c + 1 < WIDTH && active_hits.contains(&(sr, c + 1)) && h_chain.len() < ship_len {
+        c += 1;
+        h_chain.push((sr, c));
+    }
+
+    let mut v_chain = vec![pos];
+    let mut r = sr;
+    while r > 0 && active_hits.contains(&(r - 1, sc)) && v_chain.len() < ship_len {
+        r -= 1;
+        v_chain.push((r, sc));
+    }
+    r = sr;
+    while r + 1 < HEIGHT && active_hits.contains(&(r + 1, sc)) && v_chain.len() < ship_len {
+        r += 1;
+        v_chain.push((r, sc));
+    }
+
+    let to_remove = if h_chain.len() == ship_len {
+        h_chain
+    } else if v_chain.len() == ship_len {
+        v_chain
+    } else if h_chain.len() >= v_chain.len() {
+        h_chain
+    } else {
+        v_chain
+    };
+    active_hits.retain(|x| !to_remove.contains(x));
+}
+
+/// Strategy 12: Crosshair Stride + Open-Target Attack.
+///
+/// Promoted from human Bayesian approximation:
+/// 1. Hunt Mode: Staggered stride lattice (stride 4 while ship of len >= 4 remains, else stride 2).
+///    Scores each unshot active-stride cell by its "+" crosshair open arms (N, S, E, W), calculating
+///    exact combinatorial placements for max_len and min_len ships.
+/// 2. Target Mode: Fires toward open endpoints/neighbors with the longest runway.
+#[derive(Clone, Debug)]
+pub struct CrosshairStrideAttack {
+    offset4: usize,
+    initialized: bool,
+    active_hits: Vec<(usize, usize)>,
+    mode: &'static str,
+}
+
+impl Default for CrosshairStrideAttack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CrosshairStrideAttack {
+    pub fn new() -> Self {
+        Self {
+            offset4: 0,
+            initialized: false,
+            active_hits: Vec::new(),
+            mode: "crosshair_stride",
+        }
+    }
+}
+
+impl AttackStrategy for CrosshairStrideAttack {
+    fn name(&self) -> &'static str {
+        "Crosshair Stride + Open-Target"
+    }
+
+    fn reset(&mut self) {
+        self.initialized = false;
+        self.active_hits.clear();
+        self.mode = "crosshair_stride";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        if !self.initialized {
+            self.offset4 = rng.next_usize(4);
+            self.initialized = true;
+        }
+
+        if let Some(target) = choose_open_side_target(&self.active_hits, view, rng) {
+            self.mode = "target";
+            return target;
+        }
+
+        self.mode = "crosshair_stride";
+        let max_len = view.max_remaining_ship_len().max(2);
+        let min_len = view.min_remaining_ship_len().max(2);
+        let stride = if max_len >= 4 { 4 } else { 2 };
+        let target_rem = self.offset4 % stride;
+
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let mut best_cells = Vec::new();
+        let mut best_score = 0usize;
+
+        for &(r, c) in &unshot {
+            if (r + c) % stride != target_rem {
+                continue;
+            }
+            let score = evaluate_crosshair_score(view, r, c, max_len, min_len);
+            if score > best_score {
+                best_score = score;
+                best_cells.clear();
+                best_cells.push((r, c));
+            } else if score == best_score && score > 0 {
+                best_cells.push((r, c));
+            }
+        }
+
+        if !best_cells.is_empty() {
+            return best_cells[rng.next_usize(best_cells.len())];
+        }
+
+        // Fallback to any unshot cell where min_len fits
+        let mut fallback_fits = Vec::new();
+        for &(r, c) in &unshot {
+            let up = count_arm(view, r, c, -1, 0, min_len - 1);
+            let down = count_arm(view, r, c, 1, 0, min_len - 1);
+            let left = count_arm(view, r, c, 0, -1, min_len - 1);
+            let right = count_arm(view, r, c, 0, 1, min_len - 1);
+            if up + 1 + down >= min_len || left + 1 + right >= min_len {
+                fallback_fits.push((r, c));
+            }
+        }
+        if !fallback_fits.is_empty() {
+            return fallback_fits[rng.next_usize(fallback_fits.len())];
+        }
+
+        unshot[rng.next_usize(unshot.len())]
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, _view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                if !self.active_hits.contains(&pos) {
+                    self.active_hits.push(pos);
+                }
+            }
+            ShotOutcome::Sunk(kind) => {
+                remove_sunk_hits(&mut self.active_hits, pos, kind);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
+/// Strategy 13: Crosshair Stride (5->4->3->2) Attack.
+///
+/// Promoted from human Bayesian approximation with descending stride:
+/// 1. Hunt Mode: Descending stride lattice matching the max remaining ship length
+///    (5 while Carrier alive, 4 for Battleship, 3 for Cruiser/Submarine, 2 for Destroyer).
+///    Scores each unshot active-stride cell by its "+" crosshair open arms (N, S, E, W), calculating
+///    exact combinatorial placements for max_len and min_len ships.
+/// 2. Target Mode: Open-Side Target Mode firing toward endpoints/neighbors with the longest open runway.
+#[derive(Clone, Debug)]
+pub struct CrosshairDescendingAttack {
+    offset: usize,
+    initialized: bool,
+    active_hits: Vec<(usize, usize)>,
+    mode: &'static str,
+}
+
+impl Default for CrosshairDescendingAttack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CrosshairDescendingAttack {
+    pub fn new() -> Self {
+        Self {
+            offset: 0,
+            initialized: false,
+            active_hits: Vec::new(),
+            mode: "crosshair_5432",
+        }
+    }
+}
+
+impl AttackStrategy for CrosshairDescendingAttack {
+    fn name(&self) -> &'static str {
+        "Crosshair Stride (5->4->3->2)"
+    }
+
+    fn reset(&mut self) {
+        self.initialized = false;
+        self.active_hits.clear();
+        self.mode = "crosshair_5432";
+    }
+
+    fn choose_shot(&mut self, view: &TrackingBoard, rng: &mut Rng) -> (usize, usize) {
+        if !self.initialized {
+            self.offset = rng.next_usize(60);
+            self.initialized = true;
+        }
+
+        if let Some(target) = choose_open_side_target(&self.active_hits, view, rng) {
+            self.mode = "target";
+            return target;
+        }
+
+        self.mode = "crosshair_5432";
+        let max_len = view.max_remaining_ship_len().max(2);
+        let min_len = view.min_remaining_ship_len().max(2);
+        let stride = max_len;
+        let target_rem = self.offset % stride;
+
+        let unshot = view.unshot_cells();
+        assert!(!unshot.is_empty(), "No unshot cells remaining on board");
+
+        let mut best_cells = Vec::new();
+        let mut best_score = 0usize;
+
+        for &(r, c) in &unshot {
+            if (r + c) % stride != target_rem {
+                continue;
+            }
+            let score = evaluate_crosshair_score(view, r, c, max_len, min_len);
+            if score > best_score {
+                best_score = score;
+                best_cells.clear();
+                best_cells.push((r, c));
+            } else if score == best_score && score > 0 {
+                best_cells.push((r, c));
+            }
+        }
+
+        if !best_cells.is_empty() {
+            return best_cells[rng.next_usize(best_cells.len())];
+        }
+
+        // Fallback to any unshot cell where min_len fits
+        let mut fallback_fits = Vec::new();
+        for &(r, c) in &unshot {
+            let up = count_arm(view, r, c, -1, 0, min_len - 1);
+            let down = count_arm(view, r, c, 1, 0, min_len - 1);
+            let left = count_arm(view, r, c, 0, -1, min_len - 1);
+            let right = count_arm(view, r, c, 0, 1, min_len - 1);
+            if up + 1 + down >= min_len || left + 1 + right >= min_len {
+                fallback_fits.push((r, c));
+            }
+        }
+        if !fallback_fits.is_empty() {
+            return fallback_fits[rng.next_usize(fallback_fits.len())];
+        }
+
+        unshot[rng.next_usize(unshot.len())]
+    }
+
+    fn on_shot_result(&mut self, pos: (usize, usize), outcome: ShotOutcome, _view: &TrackingBoard) {
+        match outcome {
+            ShotOutcome::Miss => {}
+            ShotOutcome::Hit => {
+                if !self.active_hits.contains(&pos) {
+                    self.active_hits.push(pos);
+                }
+            }
+            ShotOutcome::Sunk(kind) => {
+                remove_sunk_hits(&mut self.active_hits, pos, kind);
+            }
+        }
+    }
+
+    fn current_mode(&self) -> &'static str {
+        self.mode
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2904,5 +3379,53 @@ mod tests {
                 assert_eq!(p.orientation, first_orient, "All ships in ParallelLanes must share orientation");
             }
         }
+    }
+
+    #[test]
+    fn test_crosshair_stride_single_game() {
+        let mut rng = Rng::with_seed(404);
+        let mut defense = RandomDefense::new();
+        let mut attack = CrosshairStrideAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
+    }
+
+    #[test]
+    fn test_crosshair_descending_single_game() {
+        let mut rng = Rng::with_seed(505);
+        let mut defense = RandomDefense::new();
+        let mut attack = CrosshairDescendingAttack::new();
+
+        let mut board = defense.place_ships(&mut rng);
+        let mut view = TrackingBoard::new();
+        attack.reset();
+
+        let mut turns = 0;
+        while !board.all_sunk() && turns < 100 {
+            turns += 1;
+            let pos = attack.choose_shot(&view, &mut rng);
+            assert!(view.is_unshot(pos.0, pos.1));
+            let outcome = board.receive_shot(pos.0, pos.1);
+            view.record_shot(pos.0, pos.1, outcome);
+            attack.on_shot_result(pos, outcome, &view);
+        }
+
+        assert!(board.all_sunk());
+        assert!(turns <= 100);
     }
 }

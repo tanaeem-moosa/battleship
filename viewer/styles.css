@@ -29,7 +29,7 @@
   --water-blue: #0b1726;
   --water-grid: #132337;
 
-  /* 11 Strategy Distinct Colors */
+  /* 13 Strategy Distinct Colors */
   --color-random: #f97316;
   --color-checkerboard: #38bdf8;
   --color-largest-rect: #10b981;
@@ -41,6 +41,8 @@
   --color-rect-checkerboard: #6366f1;
   --color-monte-carlo: #e11d48;
   --color-bayesian-pdf: #eab308;
+  --color-crosshair-stride: #14b8a6;
+  --color-crosshair-5432: #d946ef;
 
   /* 7 Defense Strategy Distinct Colors */
   --def-random: #94a3b8;
@@ -1711,7 +1713,9 @@ body.command-center-theme {
   color: var(--text-dim);
 }
 
-.benchmark-cards-grid.eleven-cards-grid {
+.benchmark-cards-grid.eleven-cards-grid,
+.benchmark-cards-grid.twelve-cards-grid,
+.benchmark-cards-grid.thirteen-cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1.25rem;
@@ -1744,6 +1748,8 @@ body.command-center-theme {
 .card-rect_checkerboard { border-top: 3px solid var(--color-rect-checkerboard); }
 .card-monte_carlo { border-top: 3px solid var(--color-monte-carlo); }
 .card-bayesian_pdf { border-top: 3px solid var(--color-bayesian-pdf); }
+.card-crosshair_stride { border-top: 3px solid var(--color-crosshair-stride); }
+.card-crosshair_5432 { border-top: 3px solid var(--color-crosshair-5432); }
 
 .strat-card-header {
   display: flex;

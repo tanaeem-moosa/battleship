@@ -21,7 +21,7 @@
       </div>
       <div class="header-branding">
         <h1 class="tactical-title">BATTLESHIP <span class="accent-text">COMMAND &amp; STRATEGY LAB</span></h1>
-        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 11 ATTACK STRATEGIES • TOURNAMENT MATRIX</div>
+        <div class="tactical-subtitle">NAVAL WARFARE SIMULATION • 13 ATTACK STRATEGIES • TOURNAMENT MATRIX</div>
       </div>
     </div>
 
@@ -64,6 +64,8 @@
               <select id="select-p1-strategy" class="tactical-select">
                 <option value="bayesian_pdf" selected>Bayesian Probability Density</option>
                 <option value="monte_carlo">Monte Carlo Sampling</option>
+                <option value="crosshair_5432">Crosshair Stride (5→4→3→2)</option>
+                <option value="crosshair_stride">Crosshair Stride + Open-Target</option>
                 <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
                 <option value="stride_5432">Descending Stride (5→4→3→2)</option>
                 <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
@@ -111,6 +113,8 @@
                 <option value="rect_stride4">Largest Rect + Stride (4→2)</option>
                 <option value="stride_5432">Descending Stride (5→4→3→2)</option>
                 <option value="rect_stride_5432">Largest Rect + Stride (5→4→3→2)</option>
+                <option value="crosshair_stride">Crosshair Stride + Open-Target</option>
+                <option value="crosshair_5432">Crosshair Stride (5→4→3→2)</option>
                 <option value="monte_carlo">Monte Carlo Sampling</option>
                 <option value="bayesian_pdf">Bayesian Probability Density</option>
               </select>
@@ -398,7 +402,7 @@
           <div class="benchmark-run-btn-container">
             <button id="btn-run-benchmark" class="action-btn primary-btn run-benchmark-btn">
               <span class="btn-icon">⚡</span>
-              <span id="run-benchmark-text">Run 11-Strategy Benchmark</span>
+              <span id="run-benchmark-text">Run 13-Strategy Benchmark</span>
             </button>
           </div>
         </div>
@@ -406,7 +410,7 @@
         <!-- Progress Bar Indicator -->
         <div id="benchmark-progress-container" class="benchmark-progress-wrapper" style="display: none;">
           <div class="progress-info-row">
-            <span id="benchmark-progress-status" class="progress-status-text">Simulating matches across 11 strategies...</span>
+            <span id="benchmark-progress-status" class="progress-status-text">Simulating matches across 13 strategies...</span>
             <span id="benchmark-progress-percent" class="progress-percent-text">0%</span>
           </div>
           <div class="progress-track">
@@ -419,18 +423,18 @@
       <div class="benchmark-subnav">
         <button id="btn-subtab-attack" class="subtab-btn active">
           <span class="subtab-icon">⚔️</span>
-          <span>Attack Algorithms (11)</span>
+          <span>Attack Algorithms (13)</span>
         </button>
         <button id="btn-subtab-defense" class="subtab-btn defense-subtab">
           <span class="subtab-icon">🛡️</span>
-          <span>Defense &amp; 7×11 Survival Matrix</span>
+          <span>Defense &amp; 7×13 Survival Matrix</span>
         </button>
       </div>
 
       <!-- ==================== SUBPANEL 1: ATTACK STRATEGY BENCHMARK ==================== -->
       <div id="attack-benchmark-section" class="benchmark-subpanel active-subpanel">
 
-        <!-- 11-STRATEGY COMPARISON LEADERBOARD TABLE -->
+        <!-- 13-STRATEGY COMPARISON LEADERBOARD TABLE -->
       <div class="leaderboard-card">
         <div class="leaderboard-header">
           <div class="lb-title-group">
@@ -460,7 +464,7 @@
               </tr>
             </thead>
             <tbody id="leaderboard-tbody">
-              <!-- Dynamically populated rows for all 11 strategies -->
+              <!-- Dynamically populated rows for all 13 strategies -->
             </tbody>
           </table>
         </div>
@@ -482,19 +486,19 @@
 
         <div class="tournament-matrix-wrapper">
           <table class="tournament-matrix-table" id="tournament-matrix-table">
-            <!-- Dynamically generated 11x11 cross-table -->
+            <!-- Dynamically generated 13x13 cross-table -->
           </table>
         </div>
       </div>
 
-      <!-- 11 STRATEGY SUMMARY CARDS GRID -->
+      <!-- 13 STRATEGY SUMMARY CARDS GRID -->
       <div class="summary-cards-section">
         <div class="cards-section-header">
-          <h3 class="cards-section-title">ALL 11 ATTACK STRATEGY PROFILES</h3>
+          <h3 class="cards-section-title">ALL 13 ATTACK STRATEGY PROFILES</h3>
           <span class="cards-section-subtitle">Algorithmic mechanics and solo evaluation telemetry</span>
         </div>
-        <div class="benchmark-cards-grid eleven-cards-grid" id="benchmark-cards-grid">
-          <!-- Dynamically rendered or updated for all 11 strategies -->
+        <div class="benchmark-cards-grid thirteen-cards-grid" id="benchmark-cards-grid">
+          <!-- Dynamically rendered or updated for all 13 strategies -->
         </div>
       </div>
 
@@ -503,10 +507,10 @@
         <div class="histogram-header">
           <div class="hist-title-group">
             <h3 class="hist-title">MULTI-STRATEGY TURN-TO-WIN FREQUENCY DISTRIBUTION</h3>
-            <span class="hist-subtitle">Comparing probability density curves across all 11 strategies (click legend pills to toggle curves)</span>
+            <span class="hist-subtitle">Comparing probability density curves across all 13 strategies (click legend pills to toggle curves)</span>
           </div>
           <div class="hist-legend-multi" id="hist-legend-multi">
-            <!-- Dynamically populated toggle pills for all 11 strategies -->
+            <!-- Dynamically populated toggle pills for all 13 strategies -->
           </div>
         </div>
 
@@ -519,7 +523,7 @@
           <div class="expl-icon">💡</div>
           <div class="expl-text">
             <strong>The Mathematical Progression of Battleship Algorithms:</strong><br>
-            • <strong>Parity Grid Family</strong> (Checkerboard, Adaptive Stride, Stride 4→2, Descending Stride 5→4→3→2): Exploits the pigeonhole principle where ships of length <code>L</code> must intersect cells matching <code>(r+c)%L == offset</code>, pruning the search space by up to 80% during early rounds.<br>
+            • <strong>Parity &amp; Crosshair Grid Family</strong> (Checkerboard, Adaptive Stride, Stride 4→2, Descending Stride 5→4→3→2, Crosshair Stride + Open-Target, Crosshair Stride 5→4→3→2): Exploits the pigeonhole principle where ships of length <code>L</code> must intersect cells matching <code>(r+c)%L == offset</code>, enhanced by 4-direction crosshair placement counts and open-runway direction priority during Target mode.<br>
             • <strong>Geometric Empty-Space Family</strong> (Largest Rect Midpoint, Rect + Stride, Rect + Checkerboard): Guarantees probe shots target the exact center of maximum unexplored territory rather than perimeter cells.<br>
             • <strong>Probabilistic &amp; Bayesian Family</strong> (Monte Carlo Sampling, Bayesian PDF): Computes the exact combinatorial probability of remaining ship placements across all unexplored cells, naturally bridging Hunt mode and Target mode with mathematical optimality!
           </div>
@@ -527,7 +531,7 @@
       </div>
       </div><!-- End #attack-benchmark-section -->
 
-      <!-- ==================== SUBPANEL 2: DEFENSIVE STRATEGY BENCHMARK & 7x11 SURVIVAL MATRIX ==================== -->
+      <!-- ==================== SUBPANEL 2: DEFENSIVE STRATEGY BENCHMARK & 7x13 SURVIVAL MATRIX ==================== -->
       <div id="defense-benchmark-section" class="benchmark-subpanel">
         <div class="defense-section-container">
 
@@ -536,7 +540,7 @@
             <div class="leaderboard-header">
               <div class="lb-title-group">
                 <h3 class="lb-title">DEFENSE STRATEGY DURABILITY LEADERBOARD</h3>
-                <span class="lb-subtitle">Ranked by highest Mean Turns Survived across all 11 Attack Strategies</span>
+                <span class="lb-subtitle">Ranked by highest Mean Turns Survived across all 13 Attack Strategies</span>
               </div>
               <div class="lb-champion-badge" id="def-champion-badge" style="border-color: #a855f7;">
                 <span class="trophy-icon">🛡️</span>
@@ -567,11 +571,11 @@
             </div>
           </div>
 
-          <!-- 7 DEFENSES x 11 ATTACKERS SURVIVAL HEATMAP MATRIX -->
+          <!-- 7 DEFENSES x 13 ATTACKERS SURVIVAL HEATMAP MATRIX -->
           <div class="tournament-card" id="survival-matrix-card">
             <div class="tournament-header">
               <div class="tourn-title-group">
-                <h3 class="tourn-title">7 DEFENSES × 11 ATTACKERS SURVIVAL HEATMAP MATRIX</h3>
+                <h3 class="tourn-title">7 DEFENSES × 13 ATTACKERS SURVIVAL HEATMAP MATRIX</h3>
                 <span class="tourn-subtitle">Mean turns survived by each defense layout against each attack algorithm. Higher = more resilient (green/cyan), Lower = more vulnerable (coral/red).</span>
               </div>
               <div class="matrix-legend">
@@ -585,7 +589,7 @@
 
             <div class="survival-heatmap-wrapper">
               <table class="survival-heatmap-table" id="survival-heatmap-table">
-                <!-- Dynamically generated 7x11 cross-table -->
+                <!-- Dynamically generated 7x13 cross-table -->
               </table>
             </div>
           </div>

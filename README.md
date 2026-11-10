@@ -4,9 +4,9 @@
 
 A high-performance, deterministic Battleship simulation engine, CLI, and HTTP server written in **pure Rust standard library (`std` only, zero external crate dependencies)**.
 
-Simulates games conforming strictly to standard Hasbro Battleship rules and provides deep statistical benchmarking across **11 distinct attack strategies** and **7 defense strategies**, including:
-- **11x11 All-Pairs Attack Tournament Matrix** & standings
-- **7 Defenses x 11 Attackers Survival Matrix** (mean turns to defeat fleet)
+Simulates games conforming strictly to standard Hasbro Battleship rules and provides deep statistical benchmarking across **13 distinct attack strategies** and **7 defense strategies**, including:
+- **13x13 All-Pairs Attack Tournament Matrix** & standings
+- **7 Defenses x 13 Attackers Survival Matrix** (mean turns to defeat fleet)
 - **7x7 Defense Head-to-Head Tournament Matrix** & overall defense rankings
 
 ---
@@ -15,7 +15,7 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
 
 - **Standard Hasbro Ruleset**: 10×10 ocean grid (`WIDTH = 10`, `HEIGHT = 10`), 5 ships (`Carrier` 5, `Battleship` 4, `Cruiser` 3, `Submarine` 3, `Destroyer` 2 — total 17 cells), orthogonal placements, non-overlapping constraints, and explicit shot outcomes (`Miss`, `Hit`, `Sunk(ShipKind)`).
 - **Fast Deterministic PRNG**: `Xoshiro256**` algorithm seeded via `SplitMix64` with unbiased Lemire integer range generation. 100% reproducible simulations given any 64-bit seed.
-- **11 Advanced Attack Strategies**:
+- **13 Advanced Attack Strategies**:
   1. `random_hunt`: **Random + Hunt/Target** — uniform random hunt mode with smart collinear and orthogonal hunt-down targeting.
   2. `checkerboard`: **Checkerboard + Hunt/Target** — parity-restricted hunt mode (`(row + col) % 2 == parity`) leveraging the mathematical certainty that any ship of length $\ge 2$ intersects the parity grid.
   3. `largest_rect`: **Largest Empty Rect Midpoint** — 2D prefix-sum algorithm finding the largest all-unshot axis-aligned rectangle (maximizing area, breaking ties by `min(height, width)`), firing at its midpoint.
@@ -27,6 +27,8 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
   9. `rect_checkerboard`: **Largest Rect + Checkerboard** — targets the checkerboard cell closest to the center of the largest unexplored rectangle.
   10. `monte_carlo`: **Monte Carlo Sampling** — simulates valid fleet configurations consistent with observed shots, accumulating a probability density heatmap to select optimal shots.
   11. `bayesian_pdf`: **Bayesian Probability Density** — calculates the exact combinatorial probability density across all remaining unsunk ship placements with exponential target-mode likelihood weighting ($1000^H$).
+  12. `crosshair_stride`: **Crosshair Stride + Open-Target** — staggered 4-to-2 lattice evaluated with a "+" crosshair arm scoring algorithm (`score = 3 * ways_max + ways_min`), paired with open-runway collinear target prioritization.
+  13. `crosshair_5432`: **Crosshair Stride (5->4->3->2)** — descending 5→4→3→2 stride lattice matching maximum afloat ship length evaluated with crosshair scoring and open-runway collinear targeting.
 - **7 Specialized Defense Strategies**:
   1. `random`: **Uniform Random** — uniform random orientation and non-overlapping placement.
   2. `spaced`: **Spaced (No-Touching)** — enforces a 1-cell halo buffer around every ship so no two ships touch orthogonally or diagonally.
@@ -36,7 +38,7 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
   6. `bait_and_hide`: **Bait Capital + Corner Destroyer** — hides small endgame ships (Destroyer, Submarine) in extreme corners and baits capital ships into interior cells with $\ge 2$-cell buffer against target splash.
   7. `parallel_lanes`: **Parallel Lanes (Single Axis)** — forces the entire fleet into a single shared axis (Horizontal or Vertical), placed in parallel lanes.
 - **Dual Round-Robin Tournaments**:
-  - **11x11 Attack Tournament**: Pairs all attack algorithms with alternating first-mover advantage.
+  - **13x13 Attack Tournament**: Pairs all attack algorithms with alternating first-mover advantage.
   - **7x7 Defense Tournament**: Pairs all defenses where both sides face identical attack algorithms.
 - **Embedded HTTP Server & REST API**: Pure `std::net::TcpListener` server hosting static assets from `viewer/` and exposing JSON API endpoints (`/api/match` and `/api/benchmark`).
 - **Zero External Dependencies**: 100% pure Rust standard library.
@@ -53,8 +55,8 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
 │   ├── main.rs                # CLI entry point (simulate, match, serve)
 │   ├── rng.rs                 # Deterministic PRNG (Xoshiro256** + SplitMix64)
 │   ├── game.rs                # Hasbro rules, Board, TrackingBoard, ShipKind, MoveRecord
-│   ├── strategy.rs            # 11 Attack Strategies, 7 Defense Strategies, TargetTracker
-│   ├── sim.rs                 # Dual tournaments (11x11 Attack, 7x7 Defense), 7x11 survival matrix
+│   ├── strategy.rs            # 13 Attack Strategies, 7 Defense Strategies, TargetTracker
+│   ├── sim.rs                 # Dual tournaments (13x13 Attack, 7x7 Defense), 7x13 survival matrix
 │   └── server.rs              # std::net HTTP server & REST API router
 ├── viewer/                    # Interactive Tactical Command Center Web UI
 │   ├── index.html             # Web viewer interface
@@ -103,23 +105,25 @@ Simulates games conforming strictly to standard Hasbro Battleship rules and prov
 =========================================================================================================
                                    BATTLESHIP ENGINE BENCHMARK REPORT                                    
 =========================================================================================================
-Games simulated: 100 solo per strategy | Tournament: 100 duels per pair | Base Seed: 42
+Games simulated: 400 solo per strategy | Tournament: 400 duels per pair | Base Seed: 42
 
 ATTACK STRATEGY PERFORMANCE (Turns to sink all 17 ship cells):
 +-----------------------------------+-------+--------+-----+-----+-------+-----+-----+
 | Strategy                          | Mean  | Median | Min | Max | StDev | P10 | P90 |
 +-----------------------------------+-------+--------+-----+-----+-------+-----+-----+
-| Bayesian Probability Density      |  45.3 |   45.5 |  29 |  72 |  8.76 |  35 |  57 |
-| Largest Rect + Checkerboard       |  47.3 |   46.5 |  27 |  62 |  7.87 |  39 |  58 |
-| Monte Carlo Sampling              |  47.4 |   45.0 |  24 |  91 | 11.05 |  35 |  62 |
-| Largest Rect + Stride (4->2)      |  48.0 |   48.0 |  27 |  90 |  9.65 |  35 |  60 |
-| Largest Rect + Stride (5->4->3->2) |  48.4 |   47.0 |  30 |  70 |  9.09 |  37 |  61 |
-| Staggered Stride (4->2)           |  51.3 |   51.0 |  30 | 100 | 11.08 |  36 |  63 |
-| Checkerboard + Hunt/Target        |  51.6 |   53.0 |  32 |  82 |  9.89 |  39 |  62 |
-| Descending Stride (5->4->3->2)    |  51.9 |   50.0 |  27 |  95 | 10.85 |  39 |  67 |
-| Adaptive Stride (2->3->4->5)      |  52.3 |   53.0 |  29 |  74 |  9.27 |  40 |  65 |
-| Largest Empty Rect Midpoint       |  53.6 |   55.0 |  25 |  93 | 12.83 |  36 |  72 |
-| Random + Hunt/Target              |  59.9 |   59.0 |  27 |  98 | 15.67 |  40 |  82 |
+| Crosshair Stride + Open-Target    |  44.8 |   45.0 |  25 |  63 |  8.63 |  33 |  56 |
+| Crosshair Stride (5->4->3->2)     |  45.6 |   46.0 |  25 |  71 |  9.15 |  34 |  58 |
+| Bayesian Probability Density      |  45.7 |   44.0 |  24 |  73 |  9.62 |  34 |  59 |
+| Monte Carlo Sampling              |  47.5 |   46.0 |  28 | 100 | 10.41 |  35 |  62 |
+| Largest Rect + Stride (5->4->3->2) |  48.1 |   47.0 |  25 |  99 | 10.75 |  35 |  62 |
+| Largest Rect + Stride (4->2)      |  48.3 |   48.0 |  25 | 100 | 10.19 |  37 |  59 |
+| Largest Rect + Checkerboard       |  49.0 |   50.0 |  25 |  96 |  9.22 |  38 |  59 |
+| Adaptive Stride (2->3->4->5)      |  50.5 |   50.5 |  26 |  73 |  9.06 |  38 |  61 |
+| Staggered Stride (4->2)           |  51.9 |   53.0 |  26 |  99 | 11.27 |  38 |  63 |
+| Checkerboard + Hunt/Target        |  52.4 |   53.5 |  22 |  99 |  9.53 |  40 |  63 |
+| Descending Stride (5->4->3->2)    |  53.0 |   52.0 |  25 |  97 | 11.30 |  40 |  68 |
+| Largest Empty Rect Midpoint       |  53.1 |   53.0 |  22 |  99 | 11.55 |  39 |  67 |
+| Random + Hunt/Target              |  60.2 |   59.0 |  27 |  98 | 15.37 |  41 |  81 |
 +-----------------------------------+-------+--------+-----+-----+-------+-----+-----+
 
 =========================================================================================================
@@ -128,21 +132,23 @@ ATTACK STRATEGY PERFORMANCE (Turns to sink all 17 ship cells):
 +------+-----------------------------------+---------+-------+--------+---------------+
 | Rank | Strategy                          | Matches |  Wins | Losses | Overall Win % |
 +------+-----------------------------------+---------+-------+--------+---------------+
-|    1 | Bayesian Probability Density      |    1000 |   672 |    328 |         67.2% |
-|    2 | Largest Rect + Checkerboard       |    1000 |   592 |    408 |         59.2% |
-|    3 | Monte Carlo Sampling              |    1000 |   577 |    423 |         57.7% |
-|    4 | Largest Rect + Stride (4->2)      |    1000 |   576 |    424 |         57.6% |
-|    5 | Largest Rect + Stride (5->4->3->2) |    1000 |   563 |    437 |         56.3% |
-|    6 | Staggered Stride (4->2)           |    1000 |   506 |    494 |         50.6% |
-|    7 | Descending Stride (5->4->3->2)    |    1000 |   497 |    503 |         49.7% |
-|    8 | Adaptive Stride (2->3->4->5)      |    1000 |   477 |    523 |         47.7% |
-|    9 | Checkerboard + Hunt/Target        |    1000 |   451 |    549 |         45.1% |
-|   10 | Largest Empty Rect Midpoint       |    1000 |   418 |    582 |         41.8% |
-|   11 | Random + Hunt/Target              |    1000 |   231 |    769 |         23.1% |
+|    1 | Crosshair Stride + Open-Target    |    4800 |  3091 |   1709 |         64.4% |
+|    2 | Bayesian Probability Density      |    4800 |  3003 |   1797 |         62.6% |
+|    3 | Crosshair Stride (5->4->3->2)     |    4800 |  2974 |   1826 |         62.0% |
+|    4 | Largest Rect + Stride (4->2)      |    4800 |  2715 |   2085 |         56.6% |
+|    5 | Monte Carlo Sampling              |    4800 |  2691 |   2109 |         56.1% |
+|    6 | Largest Rect + Checkerboard       |    4800 |  2502 |   2298 |         52.1% |
+|    7 | Largest Rect + Stride (5->4->3->2) |    4800 |  2494 |   2306 |         52.0% |
+|    8 | Staggered Stride (4->2)           |    4800 |  2190 |   2610 |         45.6% |
+|    9 | Descending Stride (5->4->3->2)    |    4800 |  2122 |   2678 |         44.2% |
+|   10 | Adaptive Stride (2->3->4->5)      |    4800 |  2085 |   2715 |         43.4% |
+|   11 | Largest Empty Rect Midpoint       |    4800 |  2017 |   2783 |         42.0% |
+|   12 | Checkerboard + Hunt/Target        |    4800 |  1939 |   2861 |         40.4% |
+|   13 | Random + Hunt/Target              |    4800 |  1377 |   3423 |         28.7% |
 +------+-----------------------------------+---------+-------+--------+---------------+
 
 =========================================================================================================
-            7 DEFENSES x 11 ATTACKERS SURVIVAL MATRIX (Mean Turns Survived - Higher is Better)           
+            7 DEFENSES x 13 ATTACKERS SURVIVAL MATRIX (Mean Turns Survived - Higher is Better)           
 =========================================================================================================
 Values indicate mean turns survived by defense against each attacker. Higher values = tougher defense.
   [D1] Uniform Random                    [D2] Spaced (No-Touching)
@@ -150,17 +156,17 @@ Values indicate mean turns survived by defense against each attacker. Higher val
   [D5] Anti-Midpoint (Bisection Dodger)  [D6] Bait Capital + Corner Destroyer
   [D7] Parallel Lanes (Single Axis)      
 
-+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+
-| Defense Strategy                  | A1  | A2  | A3  | A4  | A5  | A6  | A7  | A8  | A9  | A10 | A11 | Overall |
-+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+
-| [D1] Uniform Random                 |  61 |  58 |  58 |  54 |  59 |  52 |  45 |  49 |  48 |  46 |  49 |   52.7  |
-| [D2] Spaced (No-Touching)           |  63 |  54 |  53 |  52 |  51 |  50 |  53 |  45 |  48 |  53 |  54 |   52.4  |
-| [D3] Corner & Edge Hugging          |  63 |  49 |  70 |  46 |  50 |  51 |  49 |  53 |  52 |  57 |  50 |   53.6  |
-| [D4] Tightly Clustered Phalanx      |  53 |  61 |  56 |  46 |  41 |  48 |  42 |  46 |  44 |  40 |  37 |   46.6  |
-| [D5] Anti-Midpoint (Bisection Dodger) |  61 |  49 |  65 |  50 |  52 |  54 |  45 |  55 |  50 |  51 |  52 |   53.1  |
-| [D6] Bait Capital + Corner Destroyer |  60 |  54 |  65 |  52 |  50 |  53 |  52 |  53 |  48 |  54 |  56 |   54.4  |
-| [D7] Parallel Lanes (Single Axis)   |  64 |  55 |  50 |  52 |  51 |  49 |  48 |  50 |  50 |  53 |  43 |   51.3  |
-+-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+
++-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+
+| Defense Strategy                  | A1  | A2  | A3  | A4  | A5  | A6  | A7  | A8  | A9  | A10 | A11 | A12 | A13 | Overall |
++-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+
+| [D1] Uniform Random                 |  59 |  51 |  50 |  54 |  48 |  45 |  50 |  48 |  47 |  49 |  47 |  47 |  46 |   49.4  |
+| [D2] Spaced (No-Touching)           |  63 |  53 |  50 |  47 |  51 |  46 |  53 |  49 |  49 |  50 |  47 |  45 |  46 |   49.9  |
+| [D3] Corner & Edge Hugging          |  59 |  49 |  68 |  51 |  51 |  49 |  50 |  56 |  56 |  53 |  51 |  54 |  55 |   54.0  |
+| [D4] Tightly Clustered Phalanx      |  47 |  45 |  49 |  45 |  44 |  51 |  40 |  50 |  51 |  49 |  42 |  48 |  45 |   46.6  |
+| [D5] Anti-Midpoint (Bisection Dodger) |  60 |  52 |  64 |  54 |  52 |  49 |  53 |  52 |  52 |  54 |  52 |  49 |  49 |   53.3  |
+| [D6] Bait Capital + Corner Destroyer |  61 |  55 |  65 |  53 |  51 |  59 |  53 |  57 |  57 |  59 |  56 |  56 |  55 |   56.7  |
+| [D7] Parallel Lanes (Single Axis)   |  60 |  51 |  53 |  53 |  54 |  49 |  50 |  48 |  49 |  51 |  50 |  44 |  46 |   50.5  |
++-----------------------------------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+---------+
 
 =========================================================================================================
                                 7x7 DEFENSE TOURNAMENT WIN RATE MATRIX (%)                               
@@ -169,13 +175,13 @@ Columns indicate opponent. Value is row defense's win % against column when both
 +-----------------------------------+------+------+------+------+------+------+------+
 | Defense Strategy                  | [D1] | [D2] | [D3] | [D4] | [D5] | [D6] | [D7] |
 +-----------------------------------+------+------+------+------+------+------+------+
-| [D1] Uniform Random                |  --- |   59%|   27%|   64%|   41%|   32%|   41%|
-| [D2] Spaced (No-Touching)          |   41%|  --- |   45%|   59%|   27%|   32%|   55%|
-| [D3] Corner & Edge Hugging         |   73%|   55%|  --- |   55%|   68%|   36%|   45%|
-| [D4] Tightly Clustered Phalanx     |   36%|   41%|   45%|  --- |   36%|   45%|   45%|
-| [D5] Anti-Midpoint (Bisection Dodger) |   59%|   73%|   32%|   64%|  --- |   55%|   45%|
-| [D6] Bait Capital + Corner Destroyer |   68%|   68%|   64%|   55%|   45%|  --- |   68%|
-| [D7] Parallel Lanes (Single Axis)  |   59%|   45%|   55%|   55%|   55%|   32%|  --- |
+| [D1] Uniform Random                |  --- |   40%|   31%|   51%|   39%|   31%|   53%|
+| [D2] Spaced (No-Touching)          |   60%|  --- |   38%|   54%|   43%|   33%|   48%|
+| [D3] Corner & Edge Hugging         |   69%|   62%|  --- |   61%|   54%|   43%|   53%|
+| [D4] Tightly Clustered Phalanx     |   49%|   46%|   39%|  --- |   35%|   26%|   36%|
+| [D5] Anti-Midpoint (Bisection Dodger) |   61%|   57%|   46%|   65%|  --- |   33%|   69%|
+| [D6] Bait Capital + Corner Destroyer |   69%|   67%|   57%|   74%|   67%|  --- |   64%|
+| [D7] Parallel Lanes (Single Axis)  |   47%|   52%|   47%|   64%|   31%|   36%|  --- |
 +-----------------------------------+------+------+------+------+------+------+------+
 
 =========================================================================================================
@@ -184,13 +190,13 @@ Columns indicate opponent. Value is row defense's win % against column when both
 +------+-----------------------------------+---------+-------+--------+---------------+---------------+
 | Rank | Defense Strategy                  | Matches |  Wins | Losses | Overall Win % | Mean Survived |
 +------+-----------------------------------+---------+-------+--------+---------------+---------------+
-|    1 | Bait Capital + Corner Destroyer   |     132 |    81 |     51 |         61.4% |    54.4 turns |
-|    2 | Corner & Edge Hugging             |     132 |    73 |     59 |         55.3% |    53.6 turns |
-|    3 | Anti-Midpoint (Bisection Dodger)  |     132 |    72 |     60 |         54.5% |    53.1 turns |
-|    4 | Parallel Lanes (Single Axis)      |     132 |    66 |     66 |         50.0% |    51.3 turns |
-|    5 | Uniform Random                    |     132 |    58 |     74 |         43.9% |    52.7 turns |
-|    6 | Spaced (No-Touching)              |     132 |    57 |     75 |         43.2% |    52.4 turns |
-|    7 | Tightly Clustered Phalanx         |     132 |    55 |     77 |         41.7% |    46.6 turns |
+|    1 | Bait Capital + Corner Destroyer   |     624 |   415 |    209 |         66.5% |    56.7 turns |
+|    2 | Corner & Edge Hugging             |     624 |   356 |    268 |         57.1% |    54.0 turns |
+|    3 | Anti-Midpoint (Bisection Dodger)  |     624 |   344 |    280 |         55.1% |    53.3 turns |
+|    4 | Parallel Lanes (Single Axis)      |     624 |   288 |    336 |         46.2% |    50.5 turns |
+|    5 | Spaced (No-Touching)              |     624 |   286 |    338 |         45.8% |    49.9 turns |
+|    6 | Uniform Random                    |     624 |   255 |    369 |         40.9% |    49.4 turns |
+|    7 | Tightly Clustered Phalanx         |     624 |   240 |    384 |         38.5% |    46.6 turns |
 +------+-----------------------------------+---------+-------+--------+---------------+---------------+
 ```
 
@@ -199,7 +205,7 @@ Columns indicate opponent. Value is row defense's win % against column when both
 ## CLI Usage
 
 ### 1. Run Complete Benchmark (`simulate`)
-Simulates $N$ games (default: 1,000) for all 11 attack strategies and 7 defense strategies, printing all summary tables, cross-matrices, standings, and histograms:
+Simulates $N$ games (default: 1,000) for all 13 attack strategies and 7 defense strategies, printing all summary tables, cross-matrices, standings, and histograms:
 
 ```bash
 cargo run --release -- simulate --games 1000 --seed 42
@@ -213,7 +219,7 @@ cargo run -- match --p1 bayesian_pdf --p2 monte_carlo --d1 spaced --d2 bait_and_
 ```
 
 Attack options:
-- `random_hunt`, `checkerboard`, `largest_rect`, `adaptive_stride`, `stride4_to_2`, `rect_stride4`, `stride_5432`, `rect_stride_5432`, `rect_checkerboard`, `monte_carlo`, `bayesian_pdf`
+- `random_hunt`, `checkerboard`, `largest_rect`, `adaptive_stride`, `stride4_to_2`, `rect_stride4`, `stride_5432`, `rect_stride_5432`, `rect_checkerboard`, `monte_carlo`, `bayesian_pdf`, `crosshair_stride`, `crosshair_5432`
 
 Defense options:
 - `random`, `spaced`, `corner_edge`, `clustered`, `anti_midpoint`, `bait_and_hide`, `parallel_lanes`
@@ -242,7 +248,7 @@ cargo run -- serve --port 8080
 - Query parameters:
   - `games`: Number of games per strategy (default: 200, max: 5000)
   - `seed`: 64-bit integer seed (optional)
-- Response: `application/json` with 11-attack and 7-defense distributions, 11x11 attack matrix, 7x11 survival matrix, and 7x7 defense tournament standings.
+- Response: `application/json` with 13-attack and 7-defense distributions, 13x13 attack matrix, 7x13 survival matrix, and 7x7 defense tournament standings.
 
 ---
 
@@ -257,9 +263,9 @@ cargo test
 Test coverage includes:
 - **`rng::tests`**: Determinism, reproducibility across seeds, uniform bounds checking, Fisher-Yates shuffle validation.
 - **`game::tests`**: Hasbro ship length checks, 17 total cells, legal placement, out-of-bounds rejection, overlapping placement rejection, shot damage and sinking detection, tracking board updates.
-- **`strategy::tests`**: Fleet placement legality, single-player game completion in $\le 100$ turns for all 11 attack strategies and all 7 defense strategies, Chebyshev spaced buffer, parallel lane consistency, smart collinear targeting priority, 2D prefix-sum empty rectangle detection, Bayesian collinear dominance.
-- **`sim::tests`**: Head-to-head match completion, JSON serialization integrity, 11x11 attack tournament matrix, 7x11 defense survival matrix, 7x7 defense tournament matrix and standings verification.
-- **`server::tests`**: HTTP query string parser, strategy instantiation for all 11 attack IDs and all 7 defense IDs.
+- **`strategy::tests`**: Fleet placement legality, single-player game completion in $\le 100$ turns for all 13 attack strategies and all 7 defense strategies, Chebyshev spaced buffer, parallel lane consistency, smart collinear targeting priority, 2D prefix-sum empty rectangle detection, Bayesian collinear dominance, Crosshair Stride (`4->2` and `5->4->3->2`).
+- **`sim::tests`**: Head-to-head match completion, JSON serialization integrity, 13x13 attack tournament matrix, 7x13 defense survival matrix, 7x7 defense tournament matrix and standings verification.
+- **`server::tests`**: HTTP query string parser, strategy instantiation for all 13 attack IDs and all 7 defense IDs.
 
 ---
 

@@ -10,12 +10,14 @@ pub use game::{
     TrackingCell, HEIGHT, TOTAL_SHIP_CELLS, WIDTH,
 };
 pub use strategy::{
-    compute_bayesian_density, find_largest_empty_rectangles, place_random_fleet,
+    compute_bayesian_density, count_arm, evaluate_crosshair_score, choose_open_side_target,
+    find_largest_empty_rectangles, place_random_fleet, remove_sunk_hits,
     AdaptiveStrideUpAttack, AntiMidpointDefense, AttackStrategy, BaitAndHideDefense,
-    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense, DefenseStrategy,
-    DescendingStrideAttack, HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack,
-    ParallelLanesDefense, RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack,
-    RectStrideFourAttack, SpacedDefense, StaggeredFourToTwoAttack, TargetTracker,
+    BayesianPdfAttack, CheckerboardAttack, ClusteredDefense, CornerEdgeDefense,
+    CrosshairDescendingAttack, CrosshairStrideAttack, DefenseStrategy, DescendingStrideAttack,
+    HuntAndTargetAttack, LargestRectMidpointAttack, MonteCarloAttack, ParallelLanesDefense,
+    RandomDefense, RectCheckerboardAttack, RectDescendingStrideAttack, RectStrideFourAttack,
+    SpacedDefense, StaggeredFourToTwoAttack, TargetTracker,
 };
 pub use sim::{
     compute_stats, print_benchmark_summary, run_benchmark, simulate_game, simulate_match,
